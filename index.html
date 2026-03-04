@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SeatSync — Maersk Team Booking</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #00243D;
+    --teal: #0073AB;
+    --sky: #42B4E6;
+    --mint: #00B5B1;
+    --cream: #F5F0E8;
+    --warm: #FFF8F0;
+    --gold: #E8A020;
+    --coral: #E05A2B;
+    --dark: #0A1628;
+    --mid: #1A3550;
+    --glass: rgba(255,255,255,0.07);
+    --glass2: rgba(255,255,255,0.12);
+    --border: rgba(255,255,255,0.1);
+    --text-light: rgba(255,255,255,0.6);
+    --text-mid: rgba(255,255,255,0.85);
+    --seat-free: #00B5B1;
+    --seat-taken: #E05A2B;
+    --seat-mine: #E8A020;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--dark);
+    color: #fff;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* BG MESH */
+  body::before {
+    content:'';
+    position:fixed; inset:0;
+    background:
+      radial-gradient(ellipse 80% 60% at 10% 10%, rgba(0,115,171,0.25) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 90% 80%, rgba(0,181,177,0.15) 0%, transparent 55%),
+      radial-gradient(ellipse 40% 40% at 50% 50%, rgba(66,180,230,0.08) 0%, transparent 70%);
+    pointer-events:none; z-index:0;
+  }
+
+  /* HEADER */
+  header {
+    position: sticky; top:0; z-index:100;
+    background: rgba(10,22,40,0.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    height: 64px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: 1.25rem;
+    letter-spacing: -0.02em;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--teal), var(--mint));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+  }
+
+  .logo span { color: var(--sky); }
+
+  .header-right {
+    display: flex; align-items: center; gap: 1rem;
+  }
+
+  .week-badge {
+    background: var(--glass2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    color: var(--text-mid);
+  }
+
+  .week-badge strong { color: var(--sky); }
+
+  /* LAYOUT */
+  .app {
+    position: relative; z-index:1;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: calc(100vh - 64px);
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    background: rgba(10,22,40,0.6);
+    border-right: 1px solid var(--border);
+    padding: 1.5rem;
+    display: flex; flex-direction: column; gap: 1.5rem;
+    overflow-y: auto;
+  }
+
+  .sidebar-section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-light);
+    margin-bottom: 0.5rem;
+  }
+
+  /* WHO AM I */
+  .who-am-i {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1rem;
+  }
+
+  .user-select {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.95rem;
+    padding: 10px 12px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2342B4E6' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    transition: border-color 0.2s;
+  }
+  .user-select:focus { border-color: var(--sky); }
+  .user-select option { background: #1a2a3a; color: #fff; }
+
+  .user-avatar {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 1rem;
+    margin-bottom: 0.75rem;
+    transition: all 0.3s;
+  }
+
+  /* MINI CALENDAR */
+  .mini-calendar {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1rem;
+  }
+
+  .cal-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 0.75rem;
+  }
+
+  .cal-month {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 0.9rem;
+  }
+
+  .cal-btn {
+    background: var(--glass2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--sky);
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 0.8rem;
+    transition: all 0.15s;
+  }
+  .cal-btn:hover { background: var(--teal); border-color: var(--teal); color: #fff; }
+
+  .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+  }
+
+  .cal-day-header {
+    text-align: center;
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--text-light);
+    padding: 4px 0;
+    letter-spacing: 0.05em;
+  }
+
+  .cal-day {
+    aspect-ratio: 1;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s;
+    color: var(--text-mid);
+  }
+
+  .cal-day:hover:not(.empty):not(.past) {
+    background: var(--glass2);
+  }
+
+  .cal-day.empty { cursor: default; }
+  .cal-day.past { color: rgba(255,255,255,0.2); cursor: default; }
+
+  .cal-day.weekend { color: rgba(255,255,255,0.35); }
+  .cal-day.weekend:not(.past):hover { background: rgba(255,255,255,0.05); }
+
+  .cal-day.has-booking::after {
+    content:'';
+    position:absolute; bottom:2px;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--mint);
+  }
+
+  .cal-day.selected {
+    background: var(--teal);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .cal-day.today {
+    border: 1px solid var(--sky);
+    color: var(--sky);
+    font-weight: 600;
+  }
+
+  .cal-day.today.selected {
+    border-color: transparent;
+    background: var(--teal);
+    color: #fff;
+  }
+
+  /* LEGEND */
+  .legend {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1rem;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+
+  .legend-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-mid);
+  }
+
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  /* STATS */
+  .stats-row {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+
+  .stat-card {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .stat-icon {
+    font-size: 1.2rem;
+    width: 32px; text-align: center;
+  }
+
+  .stat-info { flex:1; }
+  .stat-val {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 1.1rem;
+    color: var(--sky);
+  }
+  .stat-label {
+    font-size: 0.72rem;
+    color: var(--text-light);
+  }
+
+  /* MAIN */
+  .main {
+    padding: 2rem;
+    display: flex; flex-direction: column; gap: 2rem;
+    overflow-y: auto;
+  }
+
+  /* SELECTED DATE HEADER */
+  .date-header {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 1rem;
+  }
+
+  .date-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: 1.8rem;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .date-title span { color: var(--sky); }
+
+  .date-sub {
+    color: var(--text-light);
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+
+  .action-btns {
+    display: flex; gap: 0.75rem;
+  }
+
+  .btn {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 10px;
+    padding: 10px 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--teal), var(--mint));
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(0,181,177,0.3);
+  }
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,181,177,0.4);
+  }
+
+  .btn-secondary {
+    background: var(--glass2);
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+  }
+  .btn-secondary:hover {
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+  }
+
+  .btn-danger {
+    background: rgba(224,90,43,0.15);
+    border: 1px solid rgba(224,90,43,0.3);
+    color: var(--coral);
+  }
+  .btn-danger:hover {
+    background: rgba(224,90,43,0.25);
+  }
+
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  /* WEEK STRIP */
+  .week-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.75rem;
+  }
+
+  .week-day-card {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .week-day-card::before {
+    content:'';
+    position:absolute; top:0; left:0; right:0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--teal), var(--mint));
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .week-day-card:hover { border-color: rgba(0,115,171,0.4); transform: translateY(-2px); }
+  .week-day-card:hover::before { opacity: 1; }
+
+  .week-day-card.active {
+    background: rgba(0,115,171,0.2);
+    border-color: var(--teal);
+  }
+  .week-day-card.active::before { opacity: 1; }
+
+  .week-day-card.weekend-card {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .wdc-day { font-size: 0.7rem; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.08em; }
+  .wdc-date { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.4rem; margin: 2px 0 6px; }
+  .wdc-seats {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.78rem;
+  }
+
+  .seats-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .seats-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+    background: linear-gradient(90deg, var(--mint), var(--sky));
+  }
+
+  .seats-bar-fill.full { background: linear-gradient(90deg, var(--coral), #ff8c66); }
+
+  .wdc-booked-names {
+    margin-top: 6px;
+    display: flex; flex-wrap: wrap; gap: 3px;
+  }
+
+  .name-chip {
+    font-size: 0.62rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  /* FLOOR PLAN */
+  .floor-plan-section {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 1.5rem;
+  }
+
+  .fp-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1.5rem;
+  }
+
+  .fp-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 1rem;
+  }
+
+  .fp-meta {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 2px;
+  }
+
+  .floor-plan {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    align-items: center;
+  }
+
+  .fp-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-light);
+    text-align: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .seats-row {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .seat {
+    width: 80px;
+    aspect-ratio: 1;
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    border: 2px solid transparent;
+    user-select: none;
+  }
+
+  .seat.free {
+    background: rgba(0,181,177,0.1);
+    border-color: rgba(0,181,177,0.35);
+  }
+  .seat.free:hover {
+    background: rgba(0,181,177,0.2);
+    border-color: var(--mint);
+    transform: translateY(-3px) scale(1.03);
+    box-shadow: 0 8px 20px rgba(0,181,177,0.25);
+  }
+
+  .seat.taken {
+    background: rgba(224,90,43,0.1);
+    border-color: rgba(224,90,43,0.25);
+    cursor: not-allowed;
+  }
+
+  .seat.mine {
+    background: rgba(232,160,32,0.15);
+    border-color: rgba(232,160,32,0.5);
+    cursor: pointer;
+  }
+  .seat.mine:hover {
+    background: rgba(232,160,32,0.2);
+    border-color: var(--gold);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(232,160,32,0.2);
+  }
+
+  .seat-icon {
+    font-size: 1.5rem;
+    margin-bottom: 2px;
+  }
+
+  .seat-num {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.5);
+  }
+
+  .seat-name {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.75);
+    text-align: center;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+  }
+
+  .seat.mine .seat-num { color: var(--gold); }
+  .seat.free .seat-num { color: var(--mint); }
+  .seat.taken .seat-num { color: rgba(255,255,255,0.4); }
+
+  /* DIVIDER */
+  .aisle {
+    width: 90%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .aisle-label {
+    background: var(--dark);
+    padding: 2px 10px;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--text-light);
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  /* WEEK BOOKING VIEW */
+  .bookings-table {
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .bt-header {
+    display: grid;
+    grid-template-columns: 140px repeat(5, 1fr);
+    background: rgba(0,115,171,0.15);
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 1rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-light);
+  }
+
+  .bt-row {
+    display: grid;
+    grid-template-columns: 140px repeat(5, 1fr);
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    align-items: center;
+    transition: background 0.15s;
+    font-size: 0.82rem;
+  }
+
+  .bt-row:last-child { border-bottom: none; }
+  .bt-row:hover { background: var(--glass2); }
+
+  .bt-person {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 500;
+  }
+
+  .bt-avatar {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .bt-cell {
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .booking-pill {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+
+  .bp-in {
+    background: rgba(0,181,177,0.2);
+    color: var(--mint);
+    border: 1px solid rgba(0,181,177,0.3);
+  }
+
+  .bp-wfh {
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.3);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* TOAST */
+  .toast-container {
+    position: fixed;
+    bottom: 1.5rem; right: 1.5rem;
+    z-index: 1000;
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+
+  .toast {
+    background: #1a2a3a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 0.85rem;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    animation: toastIn 0.3s ease;
+    max-width: 320px;
+  }
+
+  .toast.success { border-left: 3px solid var(--mint); }
+  .toast.warning { border-left: 3px solid var(--gold); }
+  .toast.error { border-left: 3px solid var(--coral); }
+  .toast.info { border-left: 3px solid var(--sky); }
+
+  @keyframes toastIn {
+    from { transform: translateX(100px); opacity:0; }
+    to { transform: translateX(0); opacity:1; }
+  }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed; inset:0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    z-index: 200;
+    display: flex; align-items: center; justify-content: center;
+    opacity:0; pointer-events:none;
+    transition: opacity 0.2s;
+  }
+
+  .modal-overlay.active {
+    opacity: 1; pointer-events: all;
+  }
+
+  .modal {
+    background: linear-gradient(135deg, #0d1f33, #132438);
+    border: 1px solid rgba(0,115,171,0.4);
+    border-radius: 20px;
+    padding: 2rem;
+    max-width: 440px;
+    width: 90%;
+    transform: scale(0.95) translateY(10px);
+    transition: transform 0.2s;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+
+  .modal-overlay.active .modal {
+    transform: scale(1) translateY(0);
+  }
+
+  .modal-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .modal-body { color: var(--text-mid); font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.5rem; }
+
+  .modal-actions { display: flex; gap: 0.75rem; justify-content: flex-end; }
+
+  /* REMINDER SECTION */
+  .reminder-card {
+    background: linear-gradient(135deg, rgba(232,160,32,0.1), rgba(232,160,32,0.05));
+    border: 1px solid rgba(232,160,32,0.25);
+    border-radius: 16px;
+    padding: 1.2rem 1.5rem;
+    display: flex; align-items: center; gap: 1rem;
+  }
+
+  .reminder-icon { font-size: 1.8rem; }
+
+  .reminder-text { flex: 1; }
+  .reminder-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700; font-size: 0.9rem;
+    color: var(--gold);
+  }
+  .reminder-desc { font-size: 0.78rem; color: var(--text-light); margin-top: 2px; }
+
+  /* RESPONSIVE */
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .main { padding: 1rem; }
+    .week-strip { grid-template-columns: repeat(3, 1fr); }
+    .floor-plan { flex-wrap: wrap; }
+  }
+
+  /* ANIMATION */
+  .fade-in { animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+  .tabs {
+    display: flex; gap: 0.5rem;
+    background: var(--glass);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 4px;
+    width: fit-content;
+  }
+
+  .tab {
+    padding: 7px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 500;
+    transition: all 0.15s;
+    color: var(--text-light);
+    border: none;
+    background: transparent;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .tab.active {
+    background: var(--teal);
+    color: #fff;
+  }
+
+  .tab:hover:not(.active) { color: #fff; }
+
+  .view-panel { display: none; }
+  .view-panel.active { display: block; animation: fadeIn 0.25s ease; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🪑</div>
+    Seat<span>Sync</span>
+  </div>
+  <div class="header-right">
+    <div class="week-badge" id="currentWeekBadge">Week of <strong>—</strong></div>
+    <div class="week-badge">🏢 Maersk Team · 10 Seats</div>
+  </div>
+</header>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <!-- WHO AM I -->
+    <div>
+      <div class="sidebar-section-title">👤 Booking as</div>
+      <div class="who-am-i">
+        <div class="user-avatar" id="userAvatar" style="background: linear-gradient(135deg, #0073AB, #00B5B1);">AB</div>
+        <select class="user-select" id="userSelect">
+          <option value="">— Select your name —</option>
+          <option value="abhishek">Abhishek</option>
+          <option value="akshay">Akshay</option>
+          <option value="ashesh">Ashesh</option>
+          <option value="avisek">Avisek</option>
+          <option value="dhiraj">Dhiraj</option>
+          <option value="kamakhya">Kamakhya</option>
+          <option value="manish">Manish</option>
+          <option value="mohini">Mohini</option>
+          <option value="nibedita">Nibedita</option>
+          <option value="shantanu">Shantanu</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- MINI CALENDAR -->
+    <div>
+      <div class="sidebar-section-title">📅 Calendar</div>
+      <div class="mini-calendar">
+        <div class="cal-nav">
+          <button class="cal-btn" id="prevMonth">‹</button>
+          <div class="cal-month" id="calMonthLabel">—</div>
+          <button class="cal-btn" id="nextMonth">›</button>
+        </div>
+        <div class="cal-grid" id="calGrid"></div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div>
+      <div class="sidebar-section-title">📊 Today's stats</div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-icon">🟢</div>
+          <div class="stat-info">
+            <div class="stat-val" id="statFree">—</div>
+            <div class="stat-label">Seats available</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-info">
+            <div class="stat-val" id="statBooked">—</div>
+            <div class="stat-label">Booked today</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🏠</div>
+          <div class="stat-info">
+            <div class="stat-val" id="statWFH">—</div>
+            <div class="stat-label">Working from home</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEGEND -->
+    <div>
+      <div class="sidebar-section-title">Legend</div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--mint)"></div>Available seat</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--coral)"></div>Booked by someone</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--gold)"></div>Your booking</div>
+      </div>
+    </div>
+
+    <!-- REMINDER -->
+    <div class="reminder-card" id="reminderCard" style="display:none">
+      <div class="reminder-icon">⏰</div>
+      <div class="reminder-text">
+        <div class="reminder-title">Friday Reminder</div>
+        <div class="reminder-desc">Book seats for next week before 4:00 PM today</div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- DATE HEADER -->
+    <div class="date-header">
+      <div>
+        <div class="date-title" id="mainDateTitle">Select a <span>date</span></div>
+        <div class="date-sub" id="mainDateSub">Choose from the calendar to view and book seats</div>
+      </div>
+      <div class="action-btns">
+        <button class="btn btn-secondary" id="bookWeekBtn" onclick="openBookWeekModal()">
+          📅 Book Whole Week
+        </button>
+        <button class="btn btn-primary" id="quickBookBtn" onclick="quickBook()" disabled>
+          ✚ Book This Day
+        </button>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('floor', this)">🗺️ Floor Plan</button>
+        <button class="tab" onclick="switchTab('week', this)">📋 Week View</button>
+        <button class="tab" onclick="switchTab('roster', this)">👥 Full Roster</button>
+      </div>
+      <div style="font-size:0.78rem; color:var(--text-light);" id="dayStatusBadge"></div>
+    </div>
+
+    <!-- WEEK STRIP -->
+    <div class="week-strip" id="weekStrip"></div>
+
+    <!-- FLOOR PLAN VIEW -->
+    <div class="view-panel active" id="panel-floor">
+      <div class="floor-plan-section">
+        <div class="fp-header">
+          <div>
+            <div class="fp-title">Office Floor Plan</div>
+            <div class="fp-meta" id="fpMeta">Select a date to view bookings</div>
+          </div>
+          <div style="display:flex;gap:0.5rem;" id="fpActions"></div>
+        </div>
+        <div class="floor-plan" id="floorPlan"></div>
+      </div>
+    </div>
+
+    <!-- WEEK VIEW -->
+    <div class="view-panel" id="panel-week">
+      <div class="bookings-table" id="weekTable"></div>
+    </div>
+
+    <!-- ROSTER VIEW -->
+    <div class="view-panel" id="panel-roster">
+      <div class="bookings-table" id="rosterTable"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">Confirm Booking</div>
+    <div class="modal-body" id="modalBody">Are you sure?</div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<script>
+// ─── DATA ─────────────────────────────────────────────────────────────────
+const TEAM = [
+  { id: 'abhishek',  name: 'Abhishek',  email: 'abhishek.kapur1@maersk.com',  color: '#4A90D9', initials: 'AK' },
+  { id: 'akshay',    name: 'Akshay',    email: 'akshay.mathur@maersk.com',    color: '#7B68EE', initials: 'AM' },
+  { id: 'ashesh',    name: 'Ashesh',    email: 'ashesh.garg@maersk.com',      color: '#20B2AA', initials: 'AG' },
+  { id: 'avisek',    name: 'Avisek',    email: 'avisek.nath@maersk.com',      color: '#FF6B6B', initials: 'AN' },
+  { id: 'dhiraj',    name: 'Dhiraj',    email: 'dhiraj.singh@maersk.com',     color: '#FFD700', initials: 'DS' },
+  { id: 'kamakhya',  name: 'Kamakhya',  email: 'kamakhya.kinkar@maersk.com',  color: '#FF8C00', initials: 'KK' },
+  { id: 'manish',    name: 'Manish',    email: 'manish.sambhar@maersk.com',   color: '#32CD32', initials: 'MS' },
+  { id: 'mohini',    name: 'Mohini',    email: 'mohini.agarwal@maersk.com',   color: '#FF69B4', initials: 'MA' },
+  { id: 'nibedita',  name: 'Nibedita',  email: 'nibedita.basak@maersk.com',   color: '#40E0D0', initials: 'NB' },
+  { id: 'shantanu',  name: 'Shantanu',  email: 'shantanu.wagh@maersk.com',    color: '#9370DB', initials: 'SW' },
+];
+
+const TOTAL_SEATS = 10;
+const SEAT_LAYOUT = [
+  [1, 2, 3, 4, 5],
+  [6, 7, 8, 9, 10],
+];
+
+// Load bookings from localStorage
+function getBookings() {
+  try { return JSON.parse(localStorage.getItem('seatsync_bookings') || '{}'); } catch { return {}; }
+}
+function saveBookings(b) { localStorage.setItem('seatsync_bookings', JSON.stringify(b)); }
+
+let state = {
+  currentUser: '',
+  selectedDate: null,
+  calYear: new Date().getFullYear(),
+  calMonth: new Date().getMonth(),
+  bookings: getBookings(), // { 'YYYY-MM-DD': { seat: userId } }
+  activeTab: 'floor',
+};
+
+// ─── UTILS ────────────────────────────────────────────────────────────────
+function dateKey(date) {
+  return date.toISOString().split('T')[0];
+}
+
+function getWeekDates(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() + diff);
+  return [0,1,2,3,4].map(i => { const dd = new Date(mon); dd.setDate(mon.getDate() + i); return dd; });
+}
+
+function fmt(date, opts) {
+  return date.toLocaleDateString('en-IN', opts);
+}
+
+function getTeamMember(id) { return TEAM.find(t => t.id === id); }
+
+function getBookingsForDate(dkey) {
+  return state.bookings[dkey] || {};
+}
+
+function countBookings(dkey) {
+  return Object.keys(getBookingsForDate(dkey)).length;
+}
+
+function getUserSeatOnDate(dkey, userId) {
+  const b = getBookingsForDate(dkey);
+  return Object.entries(b).find(([s, u]) => u === userId)?.[0];
+}
+
+function isWeekend(date) {
+  const d = date.getDay();
+  return d === 0 || d === 6;
+}
+
+function isPast(date) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(date); d.setHours(0,0,0,0);
+  return d < today;
+}
+
+// ─── RENDER CALENDAR ──────────────────────────────────────────────────────
+function renderCalendar() {
+  const { calYear, calMonth } = state;
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('calMonthLabel').textContent = `${monthNames[calMonth]} ${calYear}`;
+
+  const grid = document.getElementById('calGrid');
+  const dayHeaders = ['S','M','T','W','T','F','S'];
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  let html = dayHeaders.map(d => `<div class="cal-day-header">${d}</div>`).join('');
+
+  const first = new Date(calYear, calMonth, 1);
+  const startDow = first.getDay(); // 0=Sun
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+
+  for (let i = 0; i < startDow; i++) html += `<div class="cal-day empty"></div>`;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(calYear, calMonth, d);
+    const dkey = dateKey(date);
+    const isToday = date.getTime() === today.getTime();
+    const isSel = state.selectedDate && dateKey(state.selectedDate) === dkey;
+    const past = isPast(date) && !isToday;
+    const weekend = isWeekend(date);
+    const hasBook = countBookings(dkey) > 0;
+
+    let cls = 'cal-day';
+    if (past) cls += ' past';
+    else if (weekend) cls += ' weekend';
+    if (isToday) cls += ' today';
+    if (isSel) cls += ' selected';
+    if (hasBook && !weekend) cls += ' has-booking';
+
+    const clickable = !past && !weekend;
+    html += `<div class="${cls}" ${clickable ? `onclick="selectDate(new Date(${calYear},${calMonth},${d}))"` : ''}>${d}</div>`;
+  }
+
+  grid.innerHTML = html;
+
+  // Update current week badge
+  if (state.selectedDate) {
+    const wd = getWeekDates(state.selectedDate);
+    document.getElementById('currentWeekBadge').innerHTML = `Week of <strong>${fmt(wd[0], {month:'short', day:'numeric'})}</strong>`;
+  }
+}
+
+// ─── SELECT DATE ──────────────────────────────────────────────────────────
+function selectDate(date) {
+  state.selectedDate = date;
+  renderCalendar();
+  updateMainHeader();
+  renderWeekStrip();
+  renderActivePanel();
+  updateStats();
+  checkFridayReminder();
+}
+
+function updateMainHeader() {
+  const date = state.selectedDate;
+  if (!date) return;
+  const dkey = dateKey(date);
+  const dayName = fmt(date, {weekday:'long'});
+  const fullDate = fmt(date, {day:'numeric', month:'long', year:'numeric'});
+  document.getElementById('mainDateTitle').innerHTML = `${dayName}, <span>${fmt(date, {day:'numeric', month:'short'})}</span>`;
+  document.getElementById('mainDateSub').textContent = fullDate;
+
+  const bookCount = countBookings(dkey);
+  const free = TOTAL_SEATS - bookCount;
+  document.getElementById('dayStatusBadge').textContent = `${free} of ${TOTAL_SEATS} seats free`;
+
+  document.getElementById('quickBookBtn').disabled = !state.currentUser || isWeekend(date) || isPast(date);
+}
+
+// ─── WEEK STRIP ───────────────────────────────────────────────────────────
+function renderWeekStrip() {
+  if (!state.selectedDate) return;
+  const weekDates = getWeekDates(state.selectedDate);
+  const strip = document.getElementById('weekStrip');
+  const dayNames = ['Mon','Tue','Wed','Thu','Fri'];
+
+  strip.innerHTML = weekDates.map((date, i) => {
+    const dkey = dateKey(date);
+    const booked = countBookings(dkey);
+    const free = TOTAL_SEATS - booked;
+    const pct = (booked / TOTAL_SEATS) * 100;
+    const isFull = free === 0;
+    const isSel = state.selectedDate && dateKey(state.selectedDate) === dkey;
+    const past = isPast(date);
+
+    const bookedUsers = Object.values(getBookingsForDate(dkey));
+    const chips = bookedUsers.slice(0,4).map(uid => {
+      const m = getTeamMember(uid);
+      return m ? `<div class="name-chip" style="background:${m.color}22;color:${m.color};border-color:${m.color}33">${m.name.slice(0,3)}</div>` : '';
+    }).join('') + (bookedUsers.length > 4 ? `<div class="name-chip" style="opacity:0.5">+${bookedUsers.length-4}</div>` : '');
+
+    return `
+      <div class="week-day-card ${isSel ? 'active' : ''}" onclick="selectDate(new Date('${dkey}'))">
+        <div class="wdc-day">${dayNames[i]}</div>
+        <div class="wdc-date">${date.getDate()}</div>
+        <div class="wdc-seats">
+          <div class="seats-bar"><div class="seats-bar-fill ${isFull?'full':''}" style="width:${pct}%"></div></div>
+          <span style="font-size:0.7rem;color:${isFull?'var(--coral)':'var(--mint)'};white-space:nowrap">${free} free</span>
+        </div>
+        ${chips ? `<div class="wdc-booked-names">${chips}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+// ─── FLOOR PLAN ───────────────────────────────────────────────────────────
+function renderFloorPlan() {
+  const date = state.selectedDate;
+  if (!date) {
+    document.getElementById('floorPlan').innerHTML = `<div style="color:var(--text-light);text-align:center;padding:3rem">← Select a date from the calendar</div>`;
+    document.getElementById('fpMeta').textContent = 'Select a date to view bookings';
+    return;
+  }
+
+  const dkey = dateKey(date);
+  const bookingsOnDate = getBookingsForDate(dkey);
+  const seatToUser = {};
+  Object.entries(bookingsOnDate).forEach(([seat, uid]) => seatToUser[parseInt(seat)] = uid);
+
+  document.getElementById('fpMeta').textContent = `${fmt(date, {weekday:'long', day:'numeric', month:'long'})} · ${Object.keys(bookingsOnDate).length}/${TOTAL_SEATS} booked`;
+
+  let html = '';
+  SEAT_LAYOUT.forEach((row, ri) => {
+    html += `<div>`;
+    if (ri === 0) html += `<div class="fp-label">Row A — Window Side</div>`;
+    if (ri === 1) html += `<div class="fp-label">Row B — Aisle Side</div>`;
+    html += `<div class="seats-row">`;
+
+    row.forEach(seatNum => {
+      const uid = seatToUser[seatNum];
+      const member = uid ? getTeamMember(uid) : null;
+      const isMe = uid === state.currentUser;
+      let cls = uid ? (isMe ? 'mine' : 'taken') : 'free';
+      const canBook = !uid && state.currentUser && !isPast(date) && !isWeekend(date);
+      const canUnbook = isMe && !isPast(date);
+
+      const onclick = canBook
+        ? `bookSeat(${seatNum})`
+        : canUnbook
+        ? `unbookSeat(${seatNum})`
+        : '';
+
+      html += `
+        <div class="seat ${cls}" ${onclick ? `onclick="${onclick}" title="${canBook ? 'Click to book' : 'Click to cancel'}"` : 'title="${member ? member.name : ''}"'}>
+          <div class="seat-icon">${uid ? (isMe ? '⭐' : '🧑') : '🪑'}</div>
+          <div class="seat-num">S${seatNum}</div>
+          <div class="seat-name">${member ? member.name : 'Free'}</div>
+        </div>`;
+    });
+    html += `</div></div>`;
+
+    if (ri === 0) html += `<div class="aisle" style="width:100%"><div class="aisle-label">aisle</div></div>`;
+  });
+
+  document.getElementById('floorPlan').innerHTML = html;
+}
+
+// ─── WEEK TABLE VIEW ──────────────────────────────────────────────────────
+function renderWeekTable() {
+  const date = state.selectedDate || new Date();
+  const weekDates = getWeekDates(date);
+  const dayNames = ['Mon','Tue','Wed','Thu','Fri'];
+
+  let html = `<div class="bt-header">
+    <div>Team Member</div>
+    ${weekDates.map((d, i) => `<div style="text-align:center">${dayNames[i]}<br><span style="font-weight:400;color:var(--sky)">${fmt(d,{day:'numeric',month:'short'})}</span></div>`).join('')}
+  </div>`;
+
+  TEAM.forEach(member => {
+    html += `<div class="bt-row">
+      <div class="bt-person">
+        <div class="bt-avatar" style="background:${member.color}33;color:${member.color}">${member.initials}</div>
+        ${member.name}
+      </div>`;
+
+    weekDates.forEach(d => {
+      const dkey = dateKey(d);
+      const seat = getUserSeatOnDate(dkey, member.id);
+      html += `<div class="bt-cell">
+        ${seat
+          ? `<div class="booking-pill bp-in">S${seat} ✓</div>`
+          : `<div class="booking-pill bp-wfh">WFH</div>`}
+      </div>`;
+    });
+
+    html += `</div>`;
+  });
+
+  document.getElementById('weekTable').innerHTML = html;
+}
+
+// ─── ROSTER VIEW ──────────────────────────────────────────────────────────
+function renderRoster() {
+  // Show next 10 working days
+  const today = new Date();
+  const days = [];
+  let d = new Date(today);
+  while (days.length < 10) {
+    if (!isWeekend(d)) days.push(new Date(d));
+    d.setDate(d.getDate() + 1);
+  }
+
+  let html = `<div class="bt-header" style="grid-template-columns: 140px repeat(${Math.min(5,days.length)}, 1fr)">
+    <div>Member</div>
+    ${days.slice(0,5).map(d => `<div style="text-align:center">${fmt(d,{weekday:'short'})}<br><span style="font-weight:400;color:var(--sky)">${fmt(d,{day:'numeric',month:'short'})}</span></div>`).join('')}
+  </div>`;
+
+  TEAM.forEach(member => {
+    html += `<div class="bt-row" style="grid-template-columns: 140px repeat(${Math.min(5,days.length)}, 1fr)">
+      <div class="bt-person">
+        <div class="bt-avatar" style="background:${member.color}33;color:${member.color}">${member.initials}</div>
+        ${member.name}
+      </div>`;
+    days.slice(0,5).forEach(d => {
+      const dkey = dateKey(d);
+      const seat = getUserSeatOnDate(dkey, member.id);
+      html += `<div class="bt-cell">${seat ? `<div class="booking-pill bp-in">S${seat}</div>` : `<div class="booking-pill bp-wfh">—</div>`}</div>`;
+    });
+    html += `</div>`;
+  });
+
+  document.getElementById('rosterTable').innerHTML = html;
+}
+
+// ─── BOOK / UNBOOK ────────────────────────────────────────────────────────
+function bookSeat(seatNum) {
+  if (!state.currentUser) { showToast('Please select your name first!', 'warning'); return; }
+  const date = state.selectedDate;
+  if (!date || isWeekend(date) || isPast(date)) { showToast('Cannot book this date', 'error'); return; }
+
+  const dkey = dateKey(date);
+  const bookings = state.bookings;
+  if (!bookings[dkey]) bookings[dkey] = {};
+
+  // Check if user already has a seat
+  const existing = getUserSeatOnDate(dkey, state.currentUser);
+  if (existing) { showToast(`You already booked Seat ${existing} on this day!`, 'warning'); return; }
+
+  // Check seat is free
+  if (bookings[dkey][seatNum]) { showToast('That seat is already taken!', 'error'); return; }
+
+  bookings[dkey][seatNum] = state.currentUser;
+  state.bookings = bookings;
+  saveBookings(bookings);
+
+  const member = getTeamMember(state.currentUser);
+  showToast(`✅ Seat ${seatNum} booked for ${member.name}!`, 'success');
+  refresh();
+}
+
+function unbookSeat(seatNum) {
+  const date = state.selectedDate;
+  const dkey = dateKey(date);
+  if (state.bookings[dkey]) {
+    delete state.bookings[dkey][seatNum];
+    if (Object.keys(state.bookings[dkey]).length === 0) delete state.bookings[dkey];
+  }
+  saveBookings(state.bookings);
+  showToast(`❌ Seat ${seatNum} cancelled`, 'info');
+  refresh();
+}
+
+function quickBook() {
+  const date = state.selectedDate;
+  if (!date || !state.currentUser) return;
+  const dkey = dateKey(date);
+  const bookings = getBookingsForDate(dkey);
+  const bookedSeats = Object.keys(bookings).map(Number);
+  const existingSeat = getUserSeatOnDate(dkey, state.currentUser);
+
+  if (existingSeat) { showToast(`You already have Seat ${existingSeat} booked!`, 'warning'); return; }
+
+  // Find first free seat
+  for (let s = 1; s <= TOTAL_SEATS; s++) {
+    if (!bookedSeats.includes(s)) {
+      bookSeat(s);
+      return;
+    }
+  }
+  showToast('No seats available on this day!', 'error');
+}
+
+// ─── BOOK WHOLE WEEK ──────────────────────────────────────────────────────
+function openBookWeekModal() {
+  if (!state.currentUser) { showToast('Please select your name first!', 'warning'); return; }
+  const date = state.selectedDate || new Date();
+  const weekDates = getWeekDates(date);
+  const member = getTeamMember(state.currentUser);
+
+  const weekStr = weekDates.map(d => fmt(d, {weekday:'short', day:'numeric', month:'short'})).join(', ');
+
+  showModal(
+    '📅 Book Entire Week',
+    `<strong style="color:var(--sky)">${member.name}</strong> — you're about to book a seat for all available days:<br><br><em style="color:var(--text-light)">${weekStr}</em><br><br>Days already booked or fully occupied will be skipped.`,
+    [
+      { label: 'Book All 5 Days', style: 'btn-primary', fn: () => { bookEntireWeek(date); closeModal(); } },
+      { label: 'Cancel', style: 'btn-secondary', fn: closeModal },
+    ]
+  );
+}
+
+function bookEntireWeek(date) {
+  const weekDates = getWeekDates(date);
+  let booked = 0;
+  weekDates.forEach(d => {
+    if (isPast(d) && dateKey(d) !== dateKey(new Date())) return;
+    const dkey = dateKey(d);
+    if (!state.bookings[dkey]) state.bookings[dkey] = {};
+    const existing = getUserSeatOnDate(dkey, state.currentUser);
+    if (existing) return;
+    const bookedSeats = Object.keys(state.bookings[dkey]).map(Number);
+    for (let s = 1; s <= TOTAL_SEATS; s++) {
+      if (!bookedSeats.includes(s)) {
+        state.bookings[dkey][s] = state.currentUser;
+        booked++;
+        break;
+      }
+    }
+  });
+  saveBookings(state.bookings);
+  showToast(`🎉 Booked ${booked} day(s) for the week!`, 'success');
+  refresh();
+}
+
+// ─── STATS ────────────────────────────────────────────────────────────────
+function updateStats() {
+  const date = state.selectedDate || new Date();
+  const dkey = dateKey(date);
+  const booked = countBookings(dkey);
+  const free = TOTAL_SEATS - booked;
+  const wfh = TEAM.length - booked;
+
+  document.getElementById('statFree').textContent = free;
+  document.getElementById('statBooked').textContent = booked;
+  document.getElementById('statWFH').textContent = wfh;
+}
+
+// ─── FRIDAY REMINDER ──────────────────────────────────────────────────────
+function checkFridayReminder() {
+  const now = new Date();
+  const isFriday = now.getDay() === 5;
+  const isPM4 = now.getHours() >= 16;
+  const card = document.getElementById('reminderCard');
+  if (isFriday) {
+    card.style.display = 'flex';
+    if (isPM4) {
+      card.querySelector('.reminder-desc').textContent = 'Reminder sent to team at 4:00 PM!';
+      card.style.background = 'linear-gradient(135deg,rgba(0,181,177,0.1),rgba(0,181,177,0.05))';
+    }
+  } else {
+    // Show days until Friday
+    const daysUntilFri = (5 - now.getDay() + 7) % 7 || 7;
+    card.style.display = 'flex';
+    card.querySelector('.reminder-desc').textContent = `Next reminder in ${daysUntilFri} day(s) — every Friday at 4:00 PM`;
+  }
+}
+
+// Email reminder simulation (for actual deployment, use a backend cron job)
+function setupFridayEmailReminder() {
+  const now = new Date();
+  const isFriday = now.getDay() === 5;
+  const hour = now.getHours();
+  const min = now.getMinutes();
+
+  if (isFriday && hour === 16 && min === 0) {
+    triggerEmailReminder();
+  }
+
+  // Check every minute
+  const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+  setTimeout(() => {
+    setupFridayEmailReminder();
+    setInterval(setupFridayEmailReminder, 60000);
+  }, msUntilNextMinute);
+}
+
+function triggerEmailReminder() {
+  const lastSent = localStorage.getItem('seatsync_last_reminder');
+  const today = dateKey(new Date());
+  if (lastSent === today) return; // Already sent today
+
+  // In a real deployment, this calls your backend API
+  // For now, simulate with a toast notification
+  console.log('📧 Friday 4PM Email Reminder triggered!');
+  console.log('Recipients:', TEAM.map(t => t.email).join(', '));
+
+  localStorage.setItem('seatsync_last_reminder', today);
+  showToast('📧 Friday reminder sent to all team members!', 'success');
+}
+
+// ─── USER SELECT ──────────────────────────────────────────────────────────
+document.getElementById('userSelect').addEventListener('change', function() {
+  state.currentUser = this.value;
+  const member = getTeamMember(state.currentUser);
+  const avatar = document.getElementById('userAvatar');
+  if (member) {
+    avatar.textContent = member.initials;
+    avatar.style.background = `linear-gradient(135deg, ${member.color}, ${member.color}88)`;
+  } else {
+    avatar.textContent = '?';
+    avatar.style.background = 'linear-gradient(135deg, #0073AB, #00B5B1)';
+  }
+  refresh();
+  localStorage.setItem('seatsync_user', this.value);
+});
+
+// ─── TABS ────────────────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  state.activeTab = tab;
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`panel-${tab}`).classList.add('active');
+  btn.classList.add('active');
+  renderActivePanel();
+}
+
+function renderActivePanel() {
+  if (state.activeTab === 'floor') renderFloorPlan();
+  else if (state.activeTab === 'week') renderWeekTable();
+  else renderRoster();
+}
+
+// ─── MODAL ────────────────────────────────────────────────────────────────
+function showModal(title, body, actions) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = body;
+  document.getElementById('modalActions').innerHTML = actions.map((a, i) =>
+    `<button class="btn ${a.style}" onclick="window._modalActions[${i}]()">${a.label}</button>`
+  ).join('');
+  window._modalActions = actions.map(a => a.fn);
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ─── TOAST ────────────────────────────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const icons = { success: '✅', warning: '⚠️', error: '❌', info: 'ℹ️' };
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span>${icons[type]}</span><span>${message}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+// ─── CALENDAR NAV ─────────────────────────────────────────────────────────
+document.getElementById('prevMonth').onclick = () => {
+  state.calMonth--;
+  if (state.calMonth < 0) { state.calMonth = 11; state.calYear--; }
+  renderCalendar();
+};
+
+document.getElementById('nextMonth').onclick = () => {
+  state.calMonth++;
+  if (state.calMonth > 11) { state.calMonth = 0; state.calYear++; }
+  renderCalendar();
+};
+
+// ─── REFRESH ──────────────────────────────────────────────────────────────
+function refresh() {
+  renderCalendar();
+  renderWeekStrip();
+  updateMainHeader();
+  renderActivePanel();
+  updateStats();
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+function init() {
+  // Restore user
+  const savedUser = localStorage.getItem('seatsync_user');
+  if (savedUser) {
+    document.getElementById('userSelect').value = savedUser;
+    state.currentUser = savedUser;
+    const member = getTeamMember(savedUser);
+    if (member) {
+      const avatar = document.getElementById('userAvatar');
+      avatar.textContent = member.initials;
+      avatar.style.background = `linear-gradient(135deg, ${member.color}, ${member.color}88)`;
+    }
+  }
+
+  // Select today
+  const today = new Date();
+  if (!isWeekend(today)) {
+    state.selectedDate = today;
+  } else {
+    // Select next Monday
+    const next = new Date(today);
+    next.setDate(today.getDate() + (8 - today.getDay()));
+    state.selectedDate = next;
+    state.calMonth = next.getMonth();
+    state.calYear = next.getFullYear();
+  }
+
+  refresh();
+  checkFridayReminder();
+  setupFridayEmailReminder();
+}
+
+init();
+</script>
+</body>
+</html>
