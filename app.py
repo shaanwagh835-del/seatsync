@@ -21,7 +21,7 @@ TEAM_MEMBERS = [
 TOTAL_SEATS = 10
 
 def init_db():
-    conn = sqlite3.connect("database.db")
+    conn = 
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS bookings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +32,7 @@ def init_db():
 init_db()
 
 def get_bookings_for_date(date_str):
-    conn = sqlite3.connect("database.db")
+    conn = 
     c = conn.cursor()
     c.execute("SELECT name, seat FROM bookings WHERE date=?", (date_str,))
     rows = c.fetchall()
@@ -720,7 +720,7 @@ def api_book():
     name, date_str, seat = data.get("name"), data.get("date"), data.get("seat")
     if not name or not date_str or not seat:
         return jsonify({"success": False, "message": "Missing fields"}), 400
-    conn = sqlite3.connect("database.db")
+    conn = 
     c = conn.cursor()
     c.execute("SELECT * FROM bookings WHERE name=? AND date=?", (name, date_str))
     if c.fetchone():
@@ -743,7 +743,7 @@ def api_book():
 def api_cancel():
     data = request.json
     name, date_str = data.get("name"), data.get("date")
-    conn = sqlite3.connect("database.db")
+    conn = 
     c = conn.cursor()
     c.execute("DELETE FROM bookings WHERE name=? AND date=?", (name, date_str))
     conn.commit()
@@ -756,7 +756,7 @@ def api_delete():
     name, date_str, seat = data.get("name"), data.get("date"), data.get("seat")
     if not name or not date_str or not seat:
         return jsonify({"success": False, "message": "Missing fields"}), 400
-    conn = sqlite3.connect("database.db")
+    conn = 
     c = conn.cursor()
     c.execute("DELETE FROM bookings WHERE name=? AND date=? AND seat=?", (name, date_str, seat))
     conn.commit()
@@ -771,3 +771,4 @@ def manual_reminder():
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
+
