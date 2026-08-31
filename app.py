@@ -1,10 +1,31 @@
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
-import sqlite3, smtplib, threading, time, os
+import smtplib, threading, time, os, io
+import psycopg2
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 
 app = Flask(__name__)
+
+# ── DATABASE (Postgres / Neon) ──────────────────────────────────────────────
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+def get_db():
+    """Open a fresh connection to the shared Postgres database."""
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable is not set")
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+# ── EMAIL / SCHEDULE CONFIG ─────────────────────────────────────────────────
+MONTHLY_REPORT_EMAIL = os.environ.get("MONTHLY_REPORT_EMAIL", "")  # e.g. shaanwagh835@gmail.com
+
+def ist_now():
+    """Current time in IST (UTC+5:30), without relying on system timezone data."""
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 TEAM_MEMBERS = [
     {"id": "abhishek",  "name": "Abhishek",  "email": "abhishek.kapur1@maersk.com"},
@@ -21,10 +42,10 @@ TEAM_MEMBERS = [
 TOTAL_SEATS = 10
 
 def init_db():
-    conn = 
+    conn = get_db()
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS bookings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT, date TEXT, seat INTEGER)""")
     conn.commit()
     conn.close()
@@ -32,43 +53,153 @@ def init_db():
 init_db()
 
 def get_bookings_for_date(date_str):
-    conn = 
+    conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT name, seat FROM bookings WHERE date=?", (date_str,))
+    c.execute("SELECT name, seat FROM bookings WHERE date=%s", (date_str,))
     rows = c.fetchall()
     conn.close()
     return rows
 
-def send_friday_reminder():
+def send_email(subject, html_body, recipients, attachment_bytes=None, attachment_name=None):
+    """Generic email sender used by both the daily reminder and the monthly roster."""
     EMAIL_USER = os.environ.get("EMAIL_USER", "")
     EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
     if not EMAIL_USER or not EMAIL_PASS:
         print("EMAIL_USER or EMAIL_PASS not set.")
-        return
-    next_monday = datetime.today() + timedelta(days=3)
-    recipients = [m["email"] for m in TEAM_MEMBERS]
-    html_body = f"<h2>SeatSync Reminder</h2><p>Book your seat for next week!</p>"
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Book seats for week of {next_monday.strftime('%d %b %Y')}"
+        return False
+    if not recipients:
+        print("No recipients to send to.")
+        return False
+    msg = MIMEMultipart("mixed")
+    msg["Subject"] = subject
     msg["From"] = f"SeatSync <{EMAIL_USER}>"
     msg["To"] = ", ".join(recipients)
-    msg.attach(MIMEText(html_body, "html"))
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(html_body, "html"))
+    msg.attach(alt)
+    if attachment_bytes is not None:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(attachment_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
+        msg.attach(part)
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, recipients, msg.as_string())
-        print(f"Reminder sent at {datetime.now()}")
+        print(f"Email '{subject}' sent at {datetime.now()}")
+        return True
     except Exception as e:
         print(f"Email failed: {e}")
+        return False
+
+def send_daily_seat_reminder():
+    """Checks tomorrow's seat availability and emails the whole team."""
+    tomorrow = ist_now().date() + timedelta(days=1)
+    date_str = tomorrow.strftime("%Y-%m-%d")
+    rows = get_bookings_for_date(date_str)
+    booked = len(rows)
+    available = TOTAL_SEATS - booked
+    recipients = [m["email"] for m in TEAM_MEMBERS]
+    pretty_date = tomorrow.strftime("%A, %d %b %Y")
+    if available > 0:
+        subject = f"🟢 {available} seat(s) available for {pretty_date} — book soon!"
+        html_body = f"""<h2>SeatSync — Seat Availability</h2>
+        <p><b>{available}</b> out of {TOTAL_SEATS} seats are still available for <b>{pretty_date}</b>.</p>
+        <p>Please book as soon as possible if you plan to come to office.</p>"""
+    else:
+        subject = f"🔴 No seats available for {pretty_date}"
+        html_body = f"""<h2>SeatSync — Seat Availability</h2>
+        <p>All {TOTAL_SEATS} seats are booked for <b>{pretty_date}</b>.</p>
+        <p>No seats are available — please try to work from home tomorrow.</p>"""
+    send_email(subject, html_body, recipients)
+
+def build_monthly_roster_xlsx(year, month):
+    """Builds an Excel roster: one row per weekday of the month, one column per team member, WFO/WFH."""
+    import calendar
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT name, date, seat FROM bookings WHERE date LIKE %s", (f"{year:04d}-{month:02d}-%",))
+    rows = c.fetchall()
+    conn.close()
+    bookings_by_date = {}
+    for name, date_str, seat in rows:
+        bookings_by_date.setdefault(date_str, {})[name] = seat
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Monthly Roster"
+    header = ["Date", "Day"] + [m["name"] for m in TEAM_MEMBERS]
+    ws.append(header)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="0073AB", end_color="0073AB", fill_type="solid")
+
+    wfo_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    wfh_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    for day in range(1, days_in_month + 1):
+        d = datetime(year, month, day)
+        if d.weekday() >= 5:  # skip weekends
+            continue
+        date_str = d.strftime("%Y-%m-%d")
+        row_vals = [date_str, d.strftime("%A")]
+        for m in TEAM_MEMBERS:
+            seat = bookings_by_date.get(date_str, {}).get(m["name"])
+            row_vals.append(f"Office (Seat {seat})" if seat else "WFH")
+        ws.append(row_vals)
+        row_idx = ws.max_row
+        for col_idx, m in enumerate(TEAM_MEMBERS, start=3):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.fill = wfo_fill if "Office" in str(cell.value) else wfh_fill
+
+    for col in ws.columns:
+        max_len = max(len(str(c.value)) if c.value else 0 for c in col)
+        ws.column_dimensions[col[0].column_letter].width = max(12, max_len + 2)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def send_monthly_roster():
+    today = ist_now().date()
+    last_day = today  # this function is called ON the last day of the month
+    recipients = [MONTHLY_REPORT_EMAIL] if MONTHLY_REPORT_EMAIL else []
+    if not recipients:
+        print("MONTHLY_REPORT_EMAIL not set, skipping monthly roster email.")
+        return
+    xlsx_bytes = build_monthly_roster_xlsx(last_day.year, last_day.month)
+    month_name = last_day.strftime("%B %Y")
+    subject = f"📊 SeatSync Monthly Roster — {month_name}"
+    html_body = f"<h2>SeatSync Monthly Roster</h2><p>Attached is the full office/WFH roster for <b>{month_name}</b>.</p>"
+    filename = f"SeatSync_Roster_{last_day.strftime('%Y_%m')}.xlsx"
+    send_email(subject, html_body, recipients, xlsx_bytes, filename)
 
 def email_scheduler():
-    last_sent = None
+    """Background loop: sends the daily 9PM IST seat reminder, and the monthly
+    roster email on the last day of each month."""
+    last_daily_sent = None
+    last_monthly_sent = None
     while True:
-        now = datetime.now()
-        today = now.strftime("%Y-%m-%d")
-        if now.weekday()==4 and now.hour==16 and now.minute==0 and last_sent != today:
-            send_friday_reminder()
-            last_sent = today
+        try:
+            now = ist_now()
+            today = now.strftime("%Y-%m-%d")
+            tomorrow = (now + timedelta(days=1)).date()
+
+            # Daily reminder at 21:00 IST — only if tomorrow is a working day (Mon-Fri)
+            if now.hour == 21 and now.minute == 0 and last_daily_sent != today:
+                if tomorrow.weekday() < 5:
+                    send_daily_seat_reminder()
+                last_daily_sent = today
+
+            # Monthly roster at 21:30 IST on the last day of the month
+            if now.hour == 21 and now.minute == 30 and last_monthly_sent != today:
+                if tomorrow.day == 1:  # tomorrow rolls into a new month => today is the last day
+                    send_monthly_roster()
+                last_monthly_sent = today
+        except Exception as e:
+            print(f"Scheduler error: {e}")
         time.sleep(60)
 
 threading.Thread(target=email_scheduler, daemon=True).start()
@@ -275,7 +406,7 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 
     <div class="rc">
       <div style="font-size:1.8rem">⏰</div>
-      <div><div class="rt">Friday Reminder</div><div class="rd" id="rdesc">Every Friday at 4:00 PM IST</div></div>
+      <div><div class="rt">Daily Reminder</div><div class="rd" id="rdesc">Every day at 9:00 PM IST</div></div>
     </div>
   </aside>
 
@@ -616,8 +747,8 @@ async function updateStats(){
 
 // ── REMINDER ──────────────────────────────────────────────────────────────
 function checkReminder(){
-  const now=new Date(),fri=now.getDay()===5,dtu=(5-now.getDay()+7)%7||7;
-  document.getElementById('rdesc').textContent=fri?(now.getHours()>=16?'Reminder sent at 4:00 PM today!':'Sends at 4:00 PM today!'):`Next reminder in ${dtu} day(s) — every Friday 4PM IST`;
+  const now=new Date();
+  document.getElementById('rdesc').textContent=now.getHours()>=21?'Reminder sent at 9:00 PM today!':'Sends today at 9:00 PM IST';
 }
 
 // ── TABS ──────────────────────────────────────────────────────────────────
@@ -720,21 +851,21 @@ def api_book():
     name, date_str, seat = data.get("name"), data.get("date"), data.get("seat")
     if not name or not date_str or not seat:
         return jsonify({"success": False, "message": "Missing fields"}), 400
-    conn = 
+    conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT * FROM bookings WHERE name=? AND date=?", (name, date_str))
+    c.execute("SELECT * FROM bookings WHERE name=%s AND date=%s", (name, date_str))
     if c.fetchone():
         conn.close()
         return jsonify({"success": False, "message": "You already have a booking on this day"}), 409
-    c.execute("SELECT * FROM bookings WHERE date=? AND seat=?", (date_str, seat))
+    c.execute("SELECT * FROM bookings WHERE date=%s AND seat=%s", (date_str, seat))
     if c.fetchone():
         conn.close()
         return jsonify({"success": False, "message": "That seat is already taken"}), 409
-    c.execute("SELECT COUNT(*) FROM bookings WHERE date=?", (date_str,))
+    c.execute("SELECT COUNT(*) FROM bookings WHERE date=%s", (date_str,))
     if c.fetchone()[0] >= TOTAL_SEATS:
         conn.close()
         return jsonify({"success": False, "message": "No seats available"}), 409
-    c.execute("INSERT INTO bookings (name, date, seat) VALUES (?,?,?)", (name, date_str, seat))
+    c.execute("INSERT INTO bookings (name, date, seat) VALUES (%s,%s,%s)", (name, date_str, seat))
     conn.commit()
     conn.close()
     return jsonify({"success": True, "message": f"Seat {seat} booked for {name}"})
@@ -743,9 +874,9 @@ def api_book():
 def api_cancel():
     data = request.json
     name, date_str = data.get("name"), data.get("date")
-    conn = 
+    conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM bookings WHERE name=? AND date=?", (name, date_str))
+    c.execute("DELETE FROM bookings WHERE name=%s AND date=%s", (name, date_str))
     conn.commit()
     conn.close()
     return jsonify({"success": True, "message": "Booking cancelled"})
@@ -756,16 +887,28 @@ def api_delete():
     name, date_str, seat = data.get("name"), data.get("date"), data.get("seat")
     if not name or not date_str or not seat:
         return jsonify({"success": False, "message": "Missing fields"}), 400
-    conn = 
+    conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM bookings WHERE name=? AND date=? AND seat=?", (name, date_str, seat))
+    c.execute("DELETE FROM bookings WHERE name=%s AND date=%s AND seat=%s", (name, date_str, seat))
     conn.commit()
     conn.close()
     return jsonify({"success": True, "message": "Booking deleted"})
-def manual_reminder():
+
+@app.route("/api/send-daily-reminder", methods=["POST"])
+def manual_daily_reminder():
+    """Lets you manually trigger the 9PM reminder early, for testing."""
     try:
-        send_friday_reminder()
-        return jsonify({"success": True, "message": "Sent!"})
+        send_daily_seat_reminder()
+        return jsonify({"success": True, "message": "Daily reminder sent!"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/send-monthly-roster", methods=["POST"])
+def manual_monthly_roster():
+    """Lets you manually trigger the monthly roster email, for testing."""
+    try:
+        send_monthly_roster()
+        return jsonify({"success": True, "message": "Monthly roster sent!"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
