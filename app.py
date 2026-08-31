@@ -41,7 +41,8 @@ TEAM_MEMBERS = [
     {"id": "suresh",  "name": "Suresh",  "email": "suresh.verma@maersk.com"},
     {"id": "robby",  "name": "Robby",  "email": "roby.jacob@maersk.com"},
     {"id": "milind",  "name": "Milind",  "email": "milind.sardar1@maersk.com"},
-    {"id": "yashodip",  "name": "Yashodip",  "yashodip.patil@maersk.com"},
+    {"id": "yashodip",  "name": "Yashodip",  "email": "yashodip.patil@maersk.com"},
+    {"id": "sanju",  "name": "Sanju",  "email": "sanju.sasidharan@maersk.com"},
 ]
 TOTAL_SEATS = 10
 
