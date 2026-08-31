@@ -38,11 +38,11 @@ TEAM_MEMBERS = [
     {"id": "mohini",    "name": "Mohini",    "email": "mohini.agarwal@maersk.com"},
     {"id": "nibedita",  "name": "Nibedita",  "email": "nibedita.basak@maersk.com"},
     {"id": "shantanu",  "name": "Shantanu",  "email": "shantanu.wagh@maersk.com"},
-    {"id": "suresh",  "name": "Suresh",  "email": "suresh.verma@maersk.com"},
-    {"id": "robby",  "name": "Robby",  "email": "roby.jacob@maersk.com"},
-    {"id": "milind",  "name": "Milind",  "email": "milind.sardar1@maersk.com"},
+    {"id": "suresh",    "name": "Suresh",    "email": "suresh.verma@maersk.com"},
+    {"id": "robby",     "name": "Robby",     "email": "roby.jacob@maersk.com"},
+    {"id": "milind",    "name": "Milind",    "email": "milind.sardar1@maersk.com"},
     {"id": "yashodip",  "name": "Yashodip",  "email": "yashodip.patil@maersk.com"},
-    {"id": "sanju",  "name": "Sanju",  "email": "sanju.sasidharan@maersk.com"},
+    {"id": "sanju",     "name": "Sanju",     "email": "sanju.sasidharan@maersk.com"},
 ]
 TOTAL_SEATS = 10
 
@@ -470,6 +470,11 @@ const TEAM=[
   {id:'mohini',  name:'Mohini',  color:'#FF69B4',ini:'MA'},
   {id:'nibedita',name:'Nibedita',color:'#40E0D0',ini:'NB'},
   {id:'shantanu',name:'Shantanu',color:'#9370DB',ini:'SW'},
+  {id:'suresh',  name:'Suresh',  color:'#E8544A',ini:'SV'},
+  {id:'robby',   name:'Robby',   color:'#5CC8FF',ini:'RJ'},
+  {id:'milind',  name:'Milind',  color:'#A3D977',ini:'MS'},
+  {id:'yashodip',name:'Yashodip',color:'#C77DFF',ini:'YP'},
+  {id:'sanju',   name:'Sanju',   color:'#FFB84D',ini:'SS'},
 ];
 const SEATS=10, LAYOUT=[[1,2,3,4,5],[6,7,8,9,10]];
 
