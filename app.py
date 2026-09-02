@@ -44,7 +44,7 @@ TEAM_MEMBERS = [
     {"id": "yashodip",  "name": "Yashodip",  "email": "yashodip.patil@maersk.com"},
     {"id": "sanju",     "name": "Sanju",     "email": "sanju.sasidharan@maersk.com"},
 ]
-TOTAL_SEATS = 10
+TOTAL_SEATS = 11
 
 def init_db():
     conn = get_db()
@@ -52,6 +52,10 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS bookings (
         id SERIAL PRIMARY KEY,
         name TEXT, date TEXT, seat INTEGER)""")
+    # Safe migration: add the status column if it doesn't exist yet (won't touch existing data)
+    c.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Office'")
+    c.execute("UPDATE bookings SET status='Office' WHERE status IS NULL AND seat IS NOT NULL")
+    c.execute("UPDATE bookings SET status='WFH' WHERE status IS NULL AND seat IS NULL")
     conn.commit()
     conn.close()
 
@@ -60,7 +64,7 @@ init_db()
 def get_bookings_for_date(date_str):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT name, seat FROM bookings WHERE date=%s", (date_str,))
+    c.execute("SELECT name, seat, status FROM bookings WHERE date=%s", (date_str,))
     rows = c.fetchall()
     conn.close()
     return rows
@@ -99,37 +103,45 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
         return False
 
 def send_daily_seat_reminder():
-    """Checks tomorrow's seat availability and emails the whole team."""
+    """At 4:30 PM: checks tomorrow's seat availability and emails ONLY the people
+    who haven't booked/selected any status yet for tomorrow."""
     tomorrow = ist_now().date() + timedelta(days=1)
     date_str = tomorrow.strftime("%Y-%m-%d")
     rows = get_bookings_for_date(date_str)
-    booked = len(rows)
-    available = TOTAL_SEATS - booked
-    recipients = [m["email"] for m in TEAM_MEMBERS]
+    office_count = sum(1 for name, seat, status in rows if status == "Office")
+    already_responded = {name for name, seat, status in rows}
+    available = TOTAL_SEATS - office_count
+    recipients = [m["email"] for m in TEAM_MEMBERS if m["name"] not in already_responded]
+    if not recipients:
+        print(f"Everyone has already responded for {date_str}, no reminder needed.")
+        return
     pretty_date = tomorrow.strftime("%A, %d %b %Y")
     if available > 0:
         subject = f"🟢 {available} seat(s) available for {pretty_date} — book soon!"
         html_body = f"""<h2>SeatSync — Seat Availability</h2>
-        <p><b>{available}</b> out of {TOTAL_SEATS} seats are still available for <b>{pretty_date}</b>.</p>
+        <p>You haven't selected your plan for <b>{pretty_date}</b> yet.</p>
+        <p><b>{available}</b> out of {TOTAL_SEATS} seats are still available.</p>
         <p>Please book as soon as possible if you plan to come to office.</p>"""
     else:
         subject = f"🔴 No seats available for {pretty_date}"
         html_body = f"""<h2>SeatSync — Seat Availability</h2>
-        <p>All {TOTAL_SEATS} seats are booked for <b>{pretty_date}</b>.</p>
-        <p>No seats are available — please try to work from home tomorrow.</p>"""
+        <p>You haven't selected your plan for <b>{pretty_date}</b> yet.</p>
+        <p>All {TOTAL_SEATS} seats are already booked.</p>
+        <p>Sorry about that — please try to work from home tomorrow.</p>"""
     send_email(subject, html_body, recipients)
 
 def build_monthly_roster_xlsx(year, month):
-    """Builds an Excel roster: one row per weekday of the month, one column per team member, WFO/WFH."""
+    """Builds an Excel roster: one row per weekday of the month, one column per team member,
+    showing their status (Office/WFH/Travel/Leave/blank) for that day."""
     import calendar
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT name, date, seat FROM bookings WHERE date LIKE %s", (f"{year:04d}-{month:02d}-%",))
+    c.execute("SELECT name, date, seat, status FROM bookings WHERE date LIKE %s", (f"{year:04d}-{month:02d}-%",))
     rows = c.fetchall()
     conn.close()
     bookings_by_date = {}
-    for name, date_str, seat in rows:
-        bookings_by_date.setdefault(date_str, {})[name] = seat
+    for name, date_str, seat, status in rows:
+        bookings_by_date.setdefault(date_str, {})[name] = (status, seat)
 
     wb = Workbook()
     ws = wb.active
@@ -140,8 +152,13 @@ def build_monthly_roster_xlsx(year, month):
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="0073AB", end_color="0073AB", fill_type="solid")
 
-    wfo_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    wfh_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    fills = {
+        "Office": PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
+        "WFH":    PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid"),
+        "Travel": PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid"),
+        "Leave":  PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid"),
+        "":       PatternFill(start_color="E8E8E8", end_color="E8E8E8", fill_type="solid"),
+    }
 
     days_in_month = calendar.monthrange(year, month)[1]
     for day in range(1, days_in_month + 1):
@@ -150,14 +167,16 @@ def build_monthly_roster_xlsx(year, month):
             continue
         date_str = d.strftime("%Y-%m-%d")
         row_vals = [date_str, d.strftime("%A")]
+        statuses_for_row = []
         for m in TEAM_MEMBERS:
-            seat = bookings_by_date.get(date_str, {}).get(m["name"])
-            row_vals.append(f"Office (Seat {seat})" if seat else "WFH")
+            status, seat = bookings_by_date.get(date_str, {}).get(m["name"], ("", None))
+            label = f"Office (Seat {seat})" if status == "Office" and seat else (status or "Not marked")
+            row_vals.append(label)
+            statuses_for_row.append(status)
         ws.append(row_vals)
         row_idx = ws.max_row
-        for col_idx, m in enumerate(TEAM_MEMBERS, start=3):
-            cell = ws.cell(row=row_idx, column=col_idx)
-            cell.fill = wfo_fill if "Office" in str(cell.value) else wfh_fill
+        for col_idx, status in enumerate(statuses_for_row, start=3):
+            ws.cell(row=row_idx, column=col_idx).fill = fills.get(status, fills[""])
 
     for col in ws.columns:
         max_len = max(len(str(c.value)) if c.value else 0 for c in col)
@@ -192,8 +211,8 @@ def email_scheduler():
             today = now.strftime("%Y-%m-%d")
             tomorrow = (now + timedelta(days=1)).date()
 
-            # Daily reminder at 21:00 IST — only if tomorrow is a working day (Mon-Fri)
-            if now.hour == 21 and now.minute == 0 and last_daily_sent != today:
+            # Daily reminder at 16:30 (4:30 PM) IST — only if tomorrow is a working day (Mon-Fri)
+            if now.hour == 16 and now.minute == 30 and last_daily_sent != today:
                 if tomorrow.weekday() < 5:
                     send_daily_seat_reminder()
                 last_daily_sent = today
@@ -214,7 +233,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SeatSync — Maersk Team Booking</title>
+<title>SeatSync — Maersk Machinery Mumbai</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -324,6 +343,9 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 .pill{padding:3px 10px;border-radius:6px;font-size:0.72rem;font-weight:500;}
 .pin{background:rgba(0,181,177,0.2);color:var(--mint);border:1px solid rgba(0,181,177,0.3);}
 .pwfh{background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.3);border:1px solid rgba(255,255,255,0.08);}
+.ptravel{background:rgba(66,180,230,0.15);color:var(--sky);border:1px solid rgba(66,180,230,0.3);}
+.pleave{background:rgba(224,90,43,0.15);color:var(--coral);border:1px solid rgba(224,90,43,0.3);}
+.pnone{background:rgba(255,255,255,0.03);color:rgba(255,255,255,0.2);border:1px dashed rgba(255,255,255,0.12);}
 .tabs{display:flex;gap:0.5rem;background:var(--glass);border:1px solid var(--border);border-radius:12px;padding:4px;width:fit-content;}
 .tab{padding:7px 16px;border-radius:8px;cursor:pointer;font-size:0.82rem;font-weight:500;transition:all 0.15s;color:var(--tl);border:none;background:transparent;font-family:'DM Sans',sans-serif;}
 .tab.act{background:var(--teal);color:#fff;}
@@ -346,6 +368,40 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 .mbody{color:var(--tm);font-size:0.9rem;line-height:1.6;margin-bottom:1.5rem;}
 .mact{display:flex;gap:0.75rem;justify-content:flex-end;}
 ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px;}
+
+/* ── MOBILE RESPONSIVE (phones & small tablets) ────────────────────────── */
+@media (max-width: 860px) {
+  header{padding:0 1rem;height:auto;min-height:56px;flex-wrap:wrap;gap:6px;padding-top:8px;padding-bottom:8px;}
+  .logo{font-size:1.05rem;}
+  .hbadge{font-size:0.7rem;padding:5px 10px;}
+  .app{grid-template-columns:1fr;}
+  .sidebar{border-right:none;border-bottom:1px solid var(--border);padding:1rem;}
+  .main{padding:1rem;gap:1rem;}
+  .dtitle{font-size:1.3rem;}
+  .dh{flex-direction:column;align-items:flex-start;}
+  .abtns{width:100%;}
+  .abtns .btn{flex:1;justify-content:center;font-size:0.78rem;padding:10px 8px;}
+  .tabs{width:100%;overflow-x:auto;}
+  .tab{white-space:nowrap;padding:7px 12px;font-size:0.78rem;}
+  .ws{grid-template-columns:repeat(2,1fr);gap:0.5rem;}
+  .sr{gap:0.5rem;}
+  .seat{width:64px;}
+  .sicon{font-size:1.1rem;}
+  .snum{font-size:0.68rem;}
+  .sname{font-size:0.52rem;max-width:56px;}
+  .bt{overflow-x:auto;}
+  .bth,.btr{grid-template-columns:110px repeat(5,minmax(84px,1fr));min-width:530px;}
+  .btp{font-size:0.78rem;}
+  .modal{padding:1.25rem;width:92%;}
+}
+@media (max-width: 480px) {
+  .logo-icon{width:30px;height:30px;font-size:0.95rem;}
+  .dtitle{font-size:1.1rem;}
+  .stats{gap:6px;}
+  .sc{padding:0.6rem 0.75rem;}
+  .seat{width:56px;}
+  .fps{padding:1rem;}
+}
 </style>
 </head>
 <body>
@@ -353,7 +409,7 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
   <div class="logo"><div class="logo-icon">🪑</div>Seat<span>Sync</span></div>
   <div style="display:flex;gap:1rem;">
     <div class="hbadge" id="wkbadge">Week of <strong>—</strong></div>
-    <div class="hbadge">🏢 Maersk · 10 Seats</div>
+    <div class="hbadge">🏢 Maersk Machinery Mumbai · 11 Seats</div>
   </div>
 </header>
 
@@ -416,7 +472,7 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 
     <div class="rc">
       <div style="font-size:1.8rem">⏰</div>
-      <div><div class="rt">Daily Reminder</div><div class="rd" id="rdesc">Every day at 9:00 PM IST</div></div>
+      <div><div class="rt">Daily Reminder</div><div class="rd" id="rdesc">Every day at 4:30 PM IST</div></div>
     </div>
   </aside>
 
@@ -481,7 +537,7 @@ const TEAM=[
   {id:'yashodip',name:'Yashodip',color:'#C77DFF',ini:'YP'},
   {id:'sanju',   name:'Sanju',   color:'#FFB84D',ini:'SS'},
 ];
-const SEATS=10, LAYOUT=[[1,2,3,4,5],[6,7,8,9,10]];
+const SEATS=11, LAYOUT=[[1,2,3,4,5,6],[7,8,9,10,11]];
 
 let S={
   user: localStorage.getItem('ss_user')||'',
@@ -502,8 +558,8 @@ async function apiFetch(dateStr){
   }catch(e){S.cache[dateStr]=[];}
   return S.cache[dateStr];
 }
-async function apiBook(name,date,seat){
-  const r=await fetch('/api/book',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,date,seat})});
+async function apiBook(name,date,seat,status='Office'){
+  const r=await fetch('/api/book',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,date,seat,status})});
   return r.json();
 }
 async function apiCancel(name,date){
@@ -531,6 +587,15 @@ function weekOf(d){
 function fmt(d,o){return d.toLocaleDateString('en-IN',o);}
 function gm(id){return TEAM.find(t=>t.id===id);}
 function getSeat(bkgs,uid){return bkgs.find(b=>b.name===uid)?.seat;}
+function getEntry(bkgs,uid){return bkgs.find(b=>b.name===uid);}
+function officeOf(bkgs){return bkgs.filter(b=>b.status==='Office');}
+function statusPill(entry){
+  if(!entry) return `<div class="pill pnone">—</div>`;
+  if(entry.status==='Office') return `<div class="pill pin">S${entry.seat} 🏢</div>`;
+  if(entry.status==='Travel') return `<div class="pill ptravel">✈️ Travel</div>`;
+  if(entry.status==='Leave') return `<div class="pill pleave">🏖️ Leave</div>`;
+  return `<div class="pill pwfh">🏠 WFH</div>`;
+}
 function bust(dateStr){delete S.cache[dateStr];}
 
 // ── CALENDAR ─────────────────────────────────────────────────────────────
@@ -582,7 +647,7 @@ function updateDH(){
   document.getElementById('dtitle').innerHTML=fmt(d,{weekday:'long'})+', <span>'+fmt(d,{day:'numeric',month:'short'})+'</span>';
   document.getElementById('dsub').textContent=fmt(d,{day:'numeric',month:'long',year:'numeric'});
   const b=S.cache[dkey]||[];
-  document.getElementById('dbadge').textContent=(SEATS-b.length)+' of '+SEATS+' seats free';
+  document.getElementById('dbadge').textContent=(SEATS-officeOf(b).length)+' of '+SEATS+' seats free';
   document.getElementById('qbtn').disabled=!S.user||isWE(d)||isPast(d);
 }
 
@@ -595,8 +660,9 @@ async function renderWS(){
   document.getElementById('wstrip').innerHTML=wd.map((date,i)=>{
     const dkey=dk(date);
     const bkgs=S.cache[dkey]||[];
-    const free=SEATS-bkgs.length;
-    const pct=(bkgs.length/SEATS)*100;
+    const off=officeOf(bkgs);
+    const free=SEATS-off.length;
+    const pct=(off.length/SEATS)*100;
     const isSel=S.date&&dk(S.date)===dkey;
     const chips=bkgs.slice(0,4).map(b=>{const m=gm(b.name);return m?`<div class="nc" style="background:${m.color}22;color:${m.color};border-color:${m.color}33">${m.name.slice(0,3)}</div>`:''}).join('')+(bkgs.length>4?`<div class="nc" style="opacity:0.5">+${bkgs.length-4}</div>`:'');
     return `<div class="wdc ${isSel?'act':''}" onclick="selDate(new Date(${S.yr},${date.getMonth()},${date.getDate()}))">
@@ -619,11 +685,11 @@ async function renderFloor(){
   const dkey=dk(d);
   const bkgs=await apiFetch(dkey);
   const sm={};
-  bkgs.forEach(b=>sm[b.seat]=b.name);
-  document.getElementById('fmeta').textContent=fmt(d,{weekday:'long',day:'numeric',month:'long'})+' · '+bkgs.length+'/'+SEATS+' booked';
+  bkgs.filter(b=>b.status==='Office').forEach(b=>sm[b.seat]=b.name);
+  document.getElementById('fmeta').textContent=fmt(d,{weekday:'long',day:'numeric',month:'long'})+' · '+officeOf(bkgs).length+'/'+SEATS+' booked';
   let h='';
   LAYOUT.forEach((row,ri)=>{
-    h+=`<div><div class="fpl">${ri===0?'Row A — Window Side':'Row B — Aisle Side'}</div><div class="sr">`;
+    h+=`<div><div class="fpl">${ri===0?'Row A':'Row B'}</div><div class="sr">`;
     row.forEach(sn=>{
       const uid=sm[sn], m=uid?gm(uid):null, isMe=uid===S.user;
       const cls=uid?(isMe?'mine':'taken'):'free';
@@ -653,10 +719,23 @@ async function renderWeek(){
     h+=`<div class="btr"><div class="btp"><div class="btav" style="background:${m.color}33;color:${m.color}">${m.ini}</div>${m.name}</div>`;
     wd.forEach(x=>{
       const dkey = dk(x);
-      const s=getSeat(S.cache[dkey]||[],m.id);
+      const bkgs = S.cache[dkey]||[];
+      const entry = getEntry(bkgs, m.id);
       const past = isPast(x);
-      const canDelete = s && !past;
-      h+=`<div class="btc">${s?`<div class="pill pin" ${canDelete?`onclick="deleteBooking('${m.id}', '${dkey}', ${s})" style="cursor:pointer" title="Delete booking"`:''}>S${s} ✓</div>`:`<div class="pill pwfh">WFH</div>`}</div>`;
+      const isMe = m.id===S.user;
+      if(isMe && !past){
+        // Editable dropdown for the logged-in user's own row
+        h+=`<div class="btc"><select class="usel" style="padding:4px 8px;font-size:0.75rem;width:auto;min-width:100px;" onchange="setStatus('${dkey}', this.value)">
+          <option value="" ${!entry?'selected':''}>— Select —</option>
+          <option value="Office" ${entry&&entry.status==='Office'?'selected':''}>🏢 Office</option>
+          <option value="WFH" ${entry&&entry.status==='WFH'?'selected':''}>🏠 WFH</option>
+          <option value="Travel" ${entry&&entry.status==='Travel'?'selected':''}>✈️ Travel</option>
+          <option value="Leave" ${entry&&entry.status==='Leave'?'selected':''}>🏖️ Leave</option>
+        </select></div>`;
+      } else {
+        const canDelete = entry && !past;
+        h+=`<div class="btc" ${canDelete?`onclick="deleteBooking('${m.id}', '${dkey}')" style="cursor:pointer" title="Click to delete (admin)"`:''}>${statusPill(entry)}</div>`;
+      }
     });
     h+=`</div>`;
   });
@@ -674,10 +753,10 @@ async function renderRoster(){
     h+=`<div class="btr" style="grid-template-columns:140px repeat(5,1fr)"><div class="btp"><div class="btav" style="background:${m.color}33;color:${m.color}">${m.ini}</div>${m.name}</div>`;
     days.forEach(d=>{
       const dkey = dk(d);
-      const s=getSeat(S.cache[dkey]||[],m.id);
+      const entry=getEntry(S.cache[dkey]||[],m.id);
       const past = isPast(d);
-      const canDelete = s && !past;
-      h+=`<div class="btc">${s?`<div class="pill pin" ${canDelete?`onclick="deleteBooking('${m.id}', '${dkey}', ${s})" style="cursor:pointer" title="Delete booking"`:''}>S${s}</div>`:`<div class="pill pwfh">—</div>`}</div>`;
+      const canDelete = entry && !past;
+      h+=`<div class="btc" ${canDelete?`onclick="deleteBooking('${m.id}', '${dkey}')" style="cursor:pointer" title="Click to delete (admin)"`:''}>${statusPill(entry)}</div>`;
     });
     h+=`</div>`;
   });
@@ -689,9 +768,37 @@ async function bookSeat(sn){
   if(!S.user){toast('Please select your name first!','w');return;}
   const d=S.date; if(!d) return;
   const dkey=dk(d);
-  const r=await apiBook(S.user,dkey,sn);
+  const r=await apiBook(S.user,dkey,sn,'Office');
   if(r.success){bust(dkey);toast('✅ Seat '+sn+' booked!','s');await selDate(d);}
   else toast(r.message,'e');
+}
+async function setStatus(dateObjOrKey,status){
+  if(!S.user){toast('Please select your name first!','w');return;}
+  const dkey = typeof dateObjOrKey==='string' ? dateObjOrKey : dk(dateObjOrKey);
+  const bkgs = await apiFetch(dkey);
+  const existing = getEntry(bkgs, S.user);
+  if(existing){ // remove old entry first (switching status or clearing)
+    await apiCancel(S.user, dkey);
+    bust(dkey);
+  }
+  if(!status){ // '' means "clear / no selection"
+    toast('Cleared your plan for this day','i');
+  } else if(status==='Office'){
+    const fresh=await apiFetch(dkey);
+    const taken=officeOf(fresh).map(b=>b.seat);
+    let assigned=null;
+    for(let s=1;s<=SEATS;s++){if(!taken.includes(s)){assigned=s;break;}}
+    if(!assigned){toast('No seats available for this day!','e');await renderPanel();return;}
+    const r=await apiBook(S.user,dkey,assigned,'Office');
+    if(r.success){bust(dkey);toast('✅ Seat '+assigned+' booked!','s');}
+    else toast(r.message,'e');
+  } else {
+    const r=await apiBook(S.user,dkey,null,status);
+    if(r.success){bust(dkey);toast('✅ Marked as '+status,'s');}
+    else toast(r.message,'e');
+  }
+  if(S.date && dk(S.date)===dkey) await selDate(S.date);
+  else await renderPanel();
 }
 async function cancelSeat(sn, date=null){
   const d = date ? (typeof date === 'string' ? new Date(date) : date) : S.date;
@@ -707,11 +814,11 @@ async function cancelSeat(sn, date=null){
   } else toast(r.message,'e');
 }
 async function deleteBooking(name, date, seat){
-  if(!confirm(`Delete booking for ${name} on ${date} seat ${seat}?`)) return;
+  if(!confirm(`Delete entry for ${name} on ${date}?`)) return;
   const r=await apiDelete(name, date, seat);
   if(r.success){
     bust(date);
-    toast('🗑️ Booking deleted','i');
+    toast('🗑️ Entry deleted','i');
     if(S.date && dk(S.date)===date) await selDate(S.date);
     else await renderPanel();
   } else toast(r.message,'e');
@@ -720,8 +827,8 @@ async function quickBook(){
   const d=S.date; if(!d||!S.user) return;
   const dkey=dk(d);
   const bkgs=await apiFetch(dkey);
-  if(getSeat(bkgs,S.user)){toast('You already have a seat on this day!','w');return;}
-  const taken=bkgs.map(b=>b.seat);
+  if(getEntry(bkgs,S.user)){toast('You already have an entry on this day!','w');return;}
+  const taken=officeOf(bkgs).map(b=>b.seat);
   for(let s=1;s<=SEATS;s++){if(!taken.includes(s)){await bookSeat(s);return;}}
   toast('No seats available!','e');
 }
@@ -741,10 +848,10 @@ async function bookWeek(date){
     if(isPast(d)) continue;
     const dkey=dk(d);
     const bkgs=await apiFetch(dkey);
-    if(getSeat(bkgs,S.user)) continue;
-    const taken=bkgs.map(b=>b.seat);
+    if(getEntry(bkgs,S.user)) continue;
+    const taken=officeOf(bkgs).map(b=>b.seat);
     for(let s=1;s<=SEATS;s++){
-      if(!taken.includes(s)){const r=await apiBook(S.user,dkey,s);if(r.success){bust(dkey);n++;}break;}
+      if(!taken.includes(s)){const r=await apiBook(S.user,dkey,s,'Office');if(r.success){bust(dkey);n++;}break;}
     }
   }
   toast('🎉 Booked '+n+' day(s) for the week!','s');
@@ -755,15 +862,18 @@ async function bookWeek(date){
 async function updateStats(){
   const d=S.date||new Date();
   const b=await apiFetch(dk(d));
-  document.getElementById('stF').textContent=SEATS-b.length;
-  document.getElementById('stB').textContent=b.length;
-  document.getElementById('stW').textContent=TEAM.length-b.length;
+  const off=officeOf(b).length;
+  const wfh=b.filter(x=>x.status==='WFH').length;
+  document.getElementById('stF').textContent=SEATS-off;
+  document.getElementById('stB').textContent=off;
+  document.getElementById('stW').textContent=wfh;
 }
 
 // ── REMINDER ──────────────────────────────────────────────────────────────
 function checkReminder(){
   const now=new Date();
-  document.getElementById('rdesc').textContent=now.getHours()>=21?'Reminder sent at 9:00 PM today!':'Sends today at 9:00 PM IST';
+  const mins=now.getHours()*60+now.getMinutes();
+  document.getElementById('rdesc').textContent=mins>=(16*60+30)?'Reminder sent at 4:30 PM today!':'Sends today at 4:30 PM IST';
 }
 
 // ── TABS ──────────────────────────────────────────────────────────────────
@@ -773,6 +883,7 @@ async function switchTab(tab,btn){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('act'));
   document.getElementById('p'+tab[0]).classList.add('act');
   btn.classList.add('act');
+  document.getElementById('wstrip').style.display = (tab==='week') ? 'none' : '';
   await renderPanel();
 }
 async function renderPanel(){
@@ -858,32 +969,40 @@ def home():
 @app.route("/api/bookings/<date_str>")
 def api_get_bookings(date_str):
     rows = get_bookings_for_date(date_str)
-    return jsonify({"date": date_str, "bookings": [{"name": r[0], "seat": r[1]} for r in rows]})
+    return jsonify({"date": date_str, "bookings": [{"name": r[0], "seat": r[1], "status": r[2]} for r in rows]})
 
 @app.route("/api/book", methods=["POST"])
 def api_book():
     data = request.json
-    name, date_str, seat = data.get("name"), data.get("date"), data.get("seat")
-    if not name or not date_str or not seat:
+    name, date_str = data.get("name"), data.get("date")
+    status = data.get("status", "Office")  # Office / WFH / Travel / Leave
+    seat = data.get("seat") if status == "Office" else None
+    if status not in ("Office", "WFH", "Travel", "Leave"):
+        return jsonify({"success": False, "message": "Invalid status"}), 400
+    if not name or not date_str:
         return jsonify({"success": False, "message": "Missing fields"}), 400
+    if status == "Office" and not seat:
+        return jsonify({"success": False, "message": "Seat is required for Office bookings"}), 400
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT * FROM bookings WHERE name=%s AND date=%s", (name, date_str))
     if c.fetchone():
         conn.close()
-        return jsonify({"success": False, "message": "You already have a booking on this day"}), 409
-    c.execute("SELECT * FROM bookings WHERE date=%s AND seat=%s", (date_str, seat))
-    if c.fetchone():
-        conn.close()
-        return jsonify({"success": False, "message": "That seat is already taken"}), 409
-    c.execute("SELECT COUNT(*) FROM bookings WHERE date=%s", (date_str,))
-    if c.fetchone()[0] >= TOTAL_SEATS:
-        conn.close()
-        return jsonify({"success": False, "message": "No seats available"}), 409
-    c.execute("INSERT INTO bookings (name, date, seat) VALUES (%s,%s,%s)", (name, date_str, seat))
+        return jsonify({"success": False, "message": "You already have an entry on this day"}), 409
+    if status == "Office":
+        c.execute("SELECT * FROM bookings WHERE date=%s AND seat=%s AND status='Office'", (date_str, seat))
+        if c.fetchone():
+            conn.close()
+            return jsonify({"success": False, "message": "That seat is already taken"}), 409
+        c.execute("SELECT COUNT(*) FROM bookings WHERE date=%s AND status='Office'", (date_str,))
+        if c.fetchone()[0] >= TOTAL_SEATS:
+            conn.close()
+            return jsonify({"success": False, "message": "No seats available"}), 409
+    c.execute("INSERT INTO bookings (name, date, seat, status) VALUES (%s,%s,%s,%s)", (name, date_str, seat, status))
     conn.commit()
     conn.close()
-    return jsonify({"success": True, "message": f"Seat {seat} booked for {name}"})
+    msg = f"Seat {seat} booked for {name}" if status == "Office" else f"{name} marked as {status}"
+    return jsonify({"success": True, "message": msg})
 
 @app.route("/api/cancel", methods=["POST"])
 def api_cancel():
@@ -899,12 +1018,12 @@ def api_cancel():
 @app.route("/api/delete", methods=["POST"])
 def api_delete():
     data = request.json
-    name, date_str, seat = data.get("name"), data.get("date"), data.get("seat")
-    if not name or not date_str or not seat:
+    name, date_str = data.get("name"), data.get("date")
+    if not name or not date_str:
         return jsonify({"success": False, "message": "Missing fields"}), 400
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM bookings WHERE name=%s AND date=%s AND seat=%s", (name, date_str, seat))
+    c.execute("DELETE FROM bookings WHERE name=%s AND date=%s", (name, date_str))
     conn.commit()
     conn.close()
     return jsonify({"success": True, "message": "Booking deleted"})
@@ -929,4 +1048,3 @@ def manual_monthly_roster():
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
-
