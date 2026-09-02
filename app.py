@@ -402,6 +402,19 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
   .seat{width:56px;}
   .fps{padding:1rem;}
 }
+/* Sticky first column in Week View / Roster so the name stays visible while scrolling to Fri */
+@media (max-width: 860px) {
+  .bth{position:relative;}
+  .bth>div:first-child{position:sticky;left:0;z-index:5;background:#0d1f2d;box-shadow:2px 0 6px rgba(0,0,0,0.35);}
+  .btr{position:relative;}
+  .btp{position:sticky;left:0;z-index:4;background:#0d1f2d;box-shadow:2px 0 6px rgba(0,0,0,0.35);padding-right:8px;}
+}
+.daycap{font-size:0.62rem;font-weight:700;margin-top:3px;padding:2px 6px;border-radius:8px;display:inline-block;}
+.daycap.ok{background:rgba(0,181,177,0.18);color:var(--mint);}
+.daycap.full{background:rgba(224,90,43,0.22);color:var(--coral);}
+.wsavebar{display:flex;justify-content:space-between;align-items:center;background:var(--glass);border:1px solid var(--border);border-radius:14px;padding:0.85rem 1.1rem;margin-top:1rem;}
+.jokebox{background:rgba(0,181,177,0.1);border:1px solid rgba(0,181,177,0.25);border-radius:12px;padding:0.9rem 1rem;margin-top:0.9rem;font-size:0.85rem;line-height:1.5;color:var(--tl);}
+.pend{outline:2px solid var(--gold)!important;}
 </style>
 </head>
 <body>
@@ -549,8 +562,8 @@ let S={
 };
 
 // ── API ──────────────────────────────────────────────────────────────────
-async function apiFetch(dateStr){
-  if(S.cache[dateStr]!==undefined) return S.cache[dateStr];
+async function apiFetch(dateStr,force){
+  if(!force && S.cache[dateStr]!==undefined) return S.cache[dateStr];
   try{
     const r=await fetch('/api/bookings/'+dateStr);
     const d=await r.json();
@@ -709,36 +722,135 @@ async function renderFloor(){
 }
 
 // ── WEEK TABLE ────────────────────────────────────────────────────────────
+// ── MARINE ENGINEER JOKES (shown after saving Week View changes) ───────────
+const MARINE_JOKES=[
+  "Why did the Chief Engineer refuse to play cards in the engine room? Too many leaks in the system, and he'd already spent 5 years trusting gaskets that promised the same thing.",
+  "A 2nd Engineer says his memory's so bad he forgets things in 10 seconds. Ask what he had for breakfast — no idea. Ask about the four-hour watch alarm at 3 AM in 2019 — remembers every single beep.",
+  "Why don't marine engineers ever get lost? They just follow the trail of coffee cups from the engine control room to the mess, a route more reliable than any GPS after five years at sea.",
+  "An Oiler asked the bridge for permission to fix a leaking valve. Bridge said 'permission granted.' Oiler replied, 'I wasn't asking permission, I was telling you why I'll be late for lunch.'",
+  "Why did the seafarer bring a ladder to the bar? He heard the drinks were on the house, and after five years of climbing engine room ladders, habits die hard.",
+  "A Chief Engineer's idea of a vacation: one day where the main engine alarm doesn't go off. He's had two such days in five years, and he still talks about both of them fondly.",
+  "Why did the marine engineer break up with the calendar? Too many red flags — every single day was 'sea days' and the calendar never once mentioned shore leave.",
+  "After five years at sea, a sailor's love language is 'the generator's running smooth.' Everything else is just background noise compared to that beautiful hum.",
+  "Why do engineers trust the ship's clock more than their phones? Because the ship's clock has never once asked to 'call you back after the watch.'",
+  "A cadet asked the Chief why he always checks the bilge alarm twice. Chief said, 'Son, I've checked it wrong once. Once was enough for a whole career of double-checking.'",
+  "Why did the AB refuse to gamble on shore leave? Spent five years betting on whether the generator would start on the first try — that's enough risk for one lifetime.",
+  "A seafarer's fitness routine: climbing four decks to the bridge, then four decks back down because he forgot why he went up. Five years, still the best cardio he's ever had.",
+  "Why don't engine room watchkeepers believe in ghosts? Because after five years of weird noises from the turbocharger at 2 AM, nothing scares them anymore — not even silence.",
+  "The 3rd Engineer said his love life is like the ship's spare parts inventory: technically there, rarely used, and always 'ordered but not yet arrived.'",
+  "Why did the sailor bring string to the mess hall? Heard they were serving noodles, and after five years, he trusts nothing that isn't properly lashed down first.",
+  "A Chief Officer asked the Chief Engineer how long the repair would take. Chief Engineer said, 'Five minutes.' Five hours later, still the same five minutes — some traditions never die at sea.",
+  "Why did the marine engineer marry a life ring? Because after five years, he only trusts things rated to keep him afloat during a crisis.",
+  "An engineer says the ocean taught him patience. The ocean says it taught him nothing, since he still swears at the sewage treatment plant every single morning.",
+  "Why do old sailors never argue about the weather? Because after five years, they've learned the sea has the final word — and it's usually 'rough.'",
+  "A seafarer's idea of romance: sharing his last packet of instant noodles during a storm watch. Five years at sea will really recalibrate what counts as a grand gesture."
+];
+function randomJoke(){return MARINE_JOKES[Math.floor(Math.random()*MARINE_JOKES.length)];}
+
+// ── WEEK VIEW: pending changes so people can review before saving ─────────
+S.pendingWeek = S.pendingWeek || {};
+function pendKey(mid,dkey){return mid+'__'+dkey;}
+function effectiveStatus(mid,dkey){
+  const pk=pendKey(mid,dkey);
+  if(Object.prototype.hasOwnProperty.call(S.pendingWeek,pk)) return S.pendingWeek[pk];
+  const entry=getEntry(S.cache[dkey]||[],mid);
+  return entry?entry.status:'';
+}
+function effectiveOfficeCount(dkey){
+  const statusMap={};
+  (S.cache[dkey]||[]).forEach(b=>{statusMap[b.name]=b.status;});
+  Object.keys(S.pendingWeek).forEach(k=>{
+    const idx=k.indexOf('__');
+    const mid=k.slice(0,idx), dk2=k.slice(idx+2);
+    if(dk2===dkey){
+      const val=S.pendingWeek[k];
+      if(!val) delete statusMap[mid]; else statusMap[mid]=val;
+    }
+  });
+  return Object.values(statusMap).filter(s=>s==='Office').length;
+}
+function onWeekDropdown(mid,dkey,val){
+  const pk=pendKey(mid,dkey);
+  const before = getEntry(S.cache[dkey]||[],mid);
+  const beforeVal = before?before.status:'';
+  if(val===beforeVal) delete S.pendingWeek[pk]; else S.pendingWeek[pk]=val;
+  renderWeek();
+}
+async function saveWeekChanges(){
+  const keys=Object.keys(S.pendingWeek);
+  if(keys.length===0){toast('No changes to save','w');return;}
+  let ok=0, failed=[];
+  for(const k of keys){
+    const idx=k.indexOf('__');
+    const mid=k.slice(0,idx), dkey=k.slice(idx+2);
+    const status=S.pendingWeek[k];
+    const existing=getEntry(S.cache[dkey]||[],mid);
+    if(existing) await apiCancel(mid,dkey);
+    if(status){
+      if(status==='Office'){
+        const fresh=await apiFetch(dkey,true);
+        const taken=officeOf(fresh).map(b=>b.seat);
+        let assigned=null;
+        for(let s=1;s<=SEATS;s++){if(!taken.includes(s)){assigned=s;break;}}
+        if(!assigned){failed.push(mid+' on '+dkey);continue;}
+        const r=await apiBook(mid,dkey,assigned,'Office');
+        if(r.success)ok++; else failed.push(mid+' on '+dkey);
+      } else {
+        const r=await apiBook(mid,dkey,null,status);
+        if(r.success)ok++; else failed.push(mid+' on '+dkey);
+      }
+    } else { ok++; } // cleared entry, cancel already handled above
+    bust(dkey);
+  }
+  S.pendingWeek={};
+  await renderWeek();
+  await updateStats();
+  if(failed.length){
+    toast(ok+' saved, '+failed.length+' failed (seat may be full)','e');
+  }
+  showModal('🎉 Thanks for booking!',
+    `<p style="margin-bottom:0.5rem">Your seats are booked. Fair winds ahead! ⚓</p>
+     <div class="jokebox"><strong>😄 Joke of the day:</strong><br>${randomJoke()}</div>`,
+    [{l:'Nice one! 👍',c:'bp',fn:closeModal}]
+  );
+}
+
 async function renderWeek(){
   const d=S.date||new Date();
   const wd=weekOf(d);
   const dns=['Mon','Tue','Wed','Thu','Fri'];
   await Promise.all(wd.map(x=>apiFetch(dk(x))));
-  let h=`<div class="bth"><div>Team Member</div>${wd.map((x,i)=>`<div style="text-align:center">${dns[i]}<br><span style="font-weight:400;color:var(--sky)">${fmt(x,{day:'numeric',month:'short'})}</span></div>`).join('')}</div>`;
+  let h=`<div class="bth"><div>Team Member</div>${wd.map((x,i)=>{
+    const dkey=dk(x);
+    const cnt=effectiveOfficeCount(dkey);
+    const full=cnt>=SEATS;
+    return `<div style="text-align:center">${dns[i]}<br><span style="font-weight:400;color:var(--sky)">${fmt(x,{day:'numeric',month:'short'})}</span><br><span class="daycap ${full?'full':'ok'}">${full?'All seats booked':cnt+'/'+SEATS}</span></div>`;
+  }).join('')}</div>`;
   TEAM.forEach(m=>{
     h+=`<div class="btr"><div class="btp"><div class="btav" style="background:${m.color}33;color:${m.color}">${m.ini}</div>${m.name}</div>`;
     wd.forEach(x=>{
       const dkey = dk(x);
-      const bkgs = S.cache[dkey]||[];
-      const entry = getEntry(bkgs, m.id);
       const past = isPast(x);
-      const isMe = m.id===S.user;
-      if(isMe && !past){
-        // Editable dropdown for the logged-in user's own row
-        h+=`<div class="btc"><select class="usel" style="padding:4px 8px;font-size:0.75rem;width:auto;min-width:100px;" onchange="setStatus('${dkey}', this.value)">
-          <option value="" ${!entry?'selected':''}>— Select —</option>
-          <option value="Office" ${entry&&entry.status==='Office'?'selected':''}>🏢 Office</option>
-          <option value="WFH" ${entry&&entry.status==='WFH'?'selected':''}>🏠 WFH</option>
-          <option value="Travel" ${entry&&entry.status==='Travel'?'selected':''}>✈️ Travel</option>
-          <option value="Leave" ${entry&&entry.status==='Leave'?'selected':''}>🏖️ Leave</option>
-        </select></div>`;
+      const eff = effectiveStatus(m.id, dkey);
+      const isPending = Object.prototype.hasOwnProperty.call(S.pendingWeek, pendKey(m.id,dkey));
+      if(past){
+        const entry=getEntry(S.cache[dkey]||[],m.id);
+        h+=`<div class="btc">${statusPill(entry)}</div>`;
       } else {
-        const canDelete = entry && !past;
-        h+=`<div class="btc" ${canDelete?`onclick="deleteBooking('${m.id}', '${dkey}')" style="cursor:pointer" title="Click to delete (admin)"`:''}>${statusPill(entry)}</div>`;
+        const full = effectiveOfficeCount(dkey) >= SEATS && eff !== 'Office';
+        h+=`<div class="btc"><select class="usel ${isPending?'pend':''}" style="padding:4px 8px;font-size:0.75rem;width:auto;min-width:100px;" onchange="onWeekDropdown('${m.id}','${dkey}', this.value)">
+          <option value="" ${!eff?'selected':''}>— Select —</option>
+          <option value="Office" ${eff==='Office'?'selected':''} ${full?'disabled':''}>🏢 Office${full?' (Full)':''}</option>
+          <option value="WFH" ${eff==='WFH'?'selected':''}>🏠 WFH</option>
+          <option value="Travel" ${eff==='Travel'?'selected':''}>✈️ Travel</option>
+          <option value="Leave" ${eff==='Leave'?'selected':''}>🏖️ Leave</option>
+        </select></div>`;
       }
     });
     h+=`</div>`;
   });
+  const pendCount=Object.keys(S.pendingWeek).length;
+  h+=`<div class="wsavebar"><div>${pendCount?`<strong style="color:var(--gold)">${pendCount} unsaved change(s)</strong>`:'<span style="color:var(--tl)">No unsaved changes</span>'}</div><button class="btn bp" onclick="saveWeekChanges()">💾 Save Changes</button></div>`;
   document.getElementById('wtbl').innerHTML=h;
 }
 
