@@ -1280,7 +1280,7 @@ def api_delete():
     conn.close()
     return jsonify({"success": True, "message": "Booking deleted"})
 
-@app.route("/api/send-daily-reminder", methods=["POST"])
+@app.route("/api/send-daily-reminder", methods=["GET", "POST"])
 def manual_daily_reminder():
     """Lets you manually trigger the 9PM reminder early, for testing."""
     try:
@@ -1289,7 +1289,7 @@ def manual_daily_reminder():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-@app.route("/api/send-monthly-roster", methods=["POST"])
+@app.route("/api/send-monthly-roster", methods=["GET", "POST"])
 def manual_monthly_roster():
     """Lets you manually trigger the monthly roster email, for testing."""
     try:
