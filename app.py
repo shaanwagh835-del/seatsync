@@ -73,6 +73,9 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
     """Generic email sender used by both the daily reminder and the monthly roster."""
     EMAIL_USER = os.environ.get("EMAIL_USER", "")
     EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
+    EMAIL_SMTP_HOST = os.environ.get("EMAIL_SMTP_HOST", "smtp.office365.com")
+    EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
+    EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Shantanu Wagh")
     if not EMAIL_USER or not EMAIL_PASS:
         print("EMAIL_USER or EMAIL_PASS not set.")
         return False
@@ -81,7 +84,7 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
         return False
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
-    msg["From"] = f"SeatSync <{EMAIL_USER}>"
+    msg["From"] = f"{EMAIL_FROM_NAME} <{EMAIL_USER}>"
     msg["To"] = ", ".join(recipients)
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(html_body, "html"))
@@ -93,9 +96,15 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
         part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
         msg.attach(part)
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, recipients, msg.as_string())
+        if EMAIL_SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT) as server:
+                server.login(EMAIL_USER, EMAIL_PASS)
+                server.sendmail(EMAIL_USER, recipients, msg.as_string())
+        else:
+            with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT) as server:
+                server.starttls()
+                server.login(EMAIL_USER, EMAIL_PASS)
+                server.sendmail(EMAIL_USER, recipients, msg.as_string())
         print(f"Email '{subject}' sent at {datetime.now()}")
         return True
     except Exception as e:
@@ -103,31 +112,31 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
         return False
 
 def send_daily_seat_reminder():
-    """At 4:30 PM: checks tomorrow's seat availability and emails ONLY the people
-    who haven't booked/selected any status yet for tomorrow."""
+    """At 4:30 PM: emails everyone who has NOT booked an office seat yet for tomorrow,
+    telling them how many seats remain (or that all are booked)."""
     tomorrow = ist_now().date() + timedelta(days=1)
     date_str = tomorrow.strftime("%Y-%m-%d")
     rows = get_bookings_for_date(date_str)
-    office_count = sum(1 for name, seat, status in rows if status == "Office")
-    already_responded = {name for name, seat, status in rows}
-    available = TOTAL_SEATS - office_count
-    recipients = [m["email"] for m in TEAM_MEMBERS if m["name"] not in already_responded]
+    office_bookers = {uid for uid, seat, status in rows if status == "Office"}  # uid = e.g. "sanju"
+    available = TOTAL_SEATS - len(office_bookers)
+    recipients = [m["email"] for m in TEAM_MEMBERS if m["id"] not in office_bookers]
     if not recipients:
-        print(f"Everyone has already responded for {date_str}, no reminder needed.")
+        print(f"Everyone has already booked a seat for {date_str}, no reminder needed.")
         return
     pretty_date = tomorrow.strftime("%A, %d %b %Y")
     if available > 0:
         subject = f"🟢 {available} seat(s) available for {pretty_date} — book soon!"
-        html_body = f"""<h2>SeatSync — Seat Availability</h2>
-        <p>You haven't selected your plan for <b>{pretty_date}</b> yet.</p>
+        html_body = f"""<h2>BookMySeat — Seat Availability</h2>
+        <p>You haven't booked a seat for <b>{pretty_date}</b> yet.</p>
         <p><b>{available}</b> out of {TOTAL_SEATS} seats are still available.</p>
         <p>Please book as soon as possible if you plan to come to office.</p>"""
     else:
         subject = f"🔴 No seats available for {pretty_date}"
-        html_body = f"""<h2>SeatSync — Seat Availability</h2>
-        <p>You haven't selected your plan for <b>{pretty_date}</b> yet.</p>
+        html_body = f"""<h2>BookMySeat — Seat Availability</h2>
+        <p>You haven't booked a seat for <b>{pretty_date}</b> yet.</p>
         <p>All {TOTAL_SEATS} seats are already booked.</p>
-        <p>Sorry about that — please try to work from home tomorrow.</p>"""
+        <p>Sorry about that — please try to work from home tomorrow. 😊😊</p>
+        <p>Stay home, stay safe!</p>"""
     send_email(subject, html_body, recipients)
 
 def build_monthly_roster_xlsx(year, month):
@@ -169,7 +178,7 @@ def build_monthly_roster_xlsx(year, month):
         row_vals = [date_str, d.strftime("%A")]
         statuses_for_row = []
         for m in TEAM_MEMBERS:
-            status, seat = bookings_by_date.get(date_str, {}).get(m["name"], ("", None))
+            status, seat = bookings_by_date.get(date_str, {}).get(m["id"], ("", None))
             label = f"Office (Seat {seat})" if status == "Office" and seat else (status or "Not marked")
             row_vals.append(label)
             statuses_for_row.append(status)
@@ -195,9 +204,9 @@ def send_monthly_roster():
         return
     xlsx_bytes = build_monthly_roster_xlsx(last_day.year, last_day.month)
     month_name = last_day.strftime("%B %Y")
-    subject = f"📊 SeatSync Monthly Roster — {month_name}"
-    html_body = f"<h2>SeatSync Monthly Roster</h2><p>Attached is the full office/WFH roster for <b>{month_name}</b>.</p>"
-    filename = f"SeatSync_Roster_{last_day.strftime('%Y_%m')}.xlsx"
+    subject = f"📊 BookMySeat Monthly Roster — {month_name}"
+    html_body = f"<h2>BookMySeat Monthly Roster</h2><p>Attached is the full office/WFH roster for <b>{month_name}</b>.</p>"
+    filename = f"BookMySeat_Roster_{last_day.strftime('%Y_%m')}.xlsx"
     send_email(subject, html_body, recipients, xlsx_bytes, filename)
 
 def email_scheduler():
@@ -233,7 +242,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SeatSync — Maersk Machinery Mumbai</title>
+<title>BookMySeat — Maersk Machinery Mumbai Team</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -419,7 +428,7 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 </head>
 <body>
 <header>
-  <div class="logo"><div class="logo-icon">🪑</div>Seat<span>Sync</span></div>
+  <div class="logo"><div class="logo-icon">🪑</div>Book<span>MySeat</span></div>
   <div style="display:flex;gap:1rem;">
     <div class="hbadge" id="wkbadge">Week of <strong>—</strong></div>
     <div class="hbadge">🏢 Maersk Machinery Mumbai · 11 Seats</div>
@@ -429,27 +438,20 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 <div class="app">
   <aside class="sidebar">
     <div>
-      <div class="stitle">👤 Booking as</div>
-      <div class="wai">
+      <div class="stitle">👤 Sign in with your Maersk email</div>
+      <div class="wai" id="loginBox">
         <div class="uav" id="uav">?</div>
-        <select class="usel" id="usel">
-          <option value="">— Select your name —</option>
-          <option value="abhishek">Abhishek</option>
-          <option value="akshay">Akshay</option>
-          <option value="ashesh">Ashesh</option>
-          <option value="avisek">Avisek</option>
-          <option value="dhiraj">Dhiraj</option>
-          <option value="kamakhya">Kamakhya</option>
-          <option value="manish">Manish</option>
-          <option value="mohini">Mohini</option>
-          <option value="nibedita">Nibedita</option>
-          <option value="shantanu">Shantanu</option>
-          <option value="suresh">Suresh</option>
-          <option value="robby">Robby</option>
-          <option value="milind">Milind</option>
-          <option value="yashodip">Yashodip</option>
-          <option value="sanju">Sanju</option>
-        </select>
+        <div style="flex:1;">
+          <input type="email" id="emailInput" placeholder="yourname.lastname@maersk.com" style="width:100%;background:var(--glass2);border:1px solid var(--border);border-radius:8px;color:#fff;padding:8px 10px;font-size:0.85rem;">
+          <div id="loginMsg" style="font-size:0.72rem;color:var(--tl);margin-top:4px;"></div>
+        </div>
+      </div>
+      <div id="loggedInBox" style="display:none;" class="wai">
+        <div class="uav" id="uav2">?</div>
+        <div style="flex:1;">
+          <div style="font-weight:600;" id="loggedInName">—</div>
+          <div style="font-size:0.7rem;color:var(--tl);cursor:pointer;text-decoration:underline;" onclick="logoutUser()">Not you? Switch user</div>
+        </div>
       </div>
     </div>
 
@@ -516,10 +518,19 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
       <div class="fps">
         <div class="fph"><div><div class="fpt">Office Floor Plan</div><div class="fpm" id="fmeta">Select a date to view bookings</div></div></div>
         <div class="fp" id="fp"><div style="color:var(--tl);text-align:center;padding:3rem;font-size:0.9rem;">👈 Click any date in the calendar on the left to view seats</div></div>
+        <div class="wsavebar" id="floorSaveBar" style="margin:0.75rem 1rem 1rem;"></div>
       </div>
     </div>
     <div class="vp" id="pw"><div class="bt" id="wtbl"></div></div>
-    <div class="vp" id="pr"><div class="bt" id="rtbl"></div></div>
+    <div class="vp" id="pr">
+      <div class="wsavebar" style="margin-bottom:0.75rem;">
+        <button class="cbtn" onclick="rosterMonth(-1)">‹</button>
+        <div id="rosterMonthLabel" style="font-weight:600;">—</div>
+        <button class="cbtn" onclick="rosterMonth(1)">›</button>
+      </div>
+      <div style="font-size:0.75rem;color:var(--tl);margin-bottom:0.6rem;">📜 History view — read-only. Use Floor Plan or Week View to make changes.</div>
+      <div class="bt" id="rtbl" style="overflow-x:auto;"></div>
+    </div>
   </main>
 </div>
 
@@ -534,21 +545,21 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,22,40,0.9);backdrop-
 
 <script>
 const TEAM=[
-  {id:'abhishek',name:'Abhishek',color:'#4A90D9',ini:'AK'},
-  {id:'akshay',  name:'Akshay',  color:'#7B68EE',ini:'AM'},
-  {id:'ashesh',  name:'Ashesh',  color:'#20B2AA',ini:'AG'},
-  {id:'avisek',  name:'Avisek',  color:'#FF6B6B',ini:'AN'},
-  {id:'dhiraj',  name:'Dhiraj',  color:'#FFD700',ini:'DS'},
-  {id:'kamakhya',name:'Kamakhya',color:'#FF8C00',ini:'KK'},
-  {id:'manish',  name:'Manish',  color:'#32CD32',ini:'MS'},
-  {id:'mohini',  name:'Mohini',  color:'#FF69B4',ini:'MA'},
-  {id:'nibedita',name:'Nibedita',color:'#40E0D0',ini:'NB'},
-  {id:'shantanu',name:'Shantanu',color:'#9370DB',ini:'SW'},
-  {id:'suresh',  name:'Suresh',  color:'#E8544A',ini:'SV'},
-  {id:'robby',   name:'Robby',   color:'#5CC8FF',ini:'RJ'},
-  {id:'milind',  name:'Milind',  color:'#A3D977',ini:'MS'},
-  {id:'yashodip',name:'Yashodip',color:'#C77DFF',ini:'YP'},
-  {id:'sanju',   name:'Sanju',   color:'#FFB84D',ini:'SS'},
+  {id:'abhishek',name:'Abhishek',color:'#4A90D9',ini:'AK',email:'abhishek.kapur1@maersk.com'},
+  {id:'akshay',  name:'Akshay',  color:'#7B68EE',ini:'AM',email:'akshay.mathur@maersk.com'},
+  {id:'ashesh',  name:'Ashesh',  color:'#20B2AA',ini:'AG',email:'ashesh.garg@maersk.com'},
+  {id:'avisek',  name:'Avisek',  color:'#FF6B6B',ini:'AN',email:'avisek.nath@maersk.com'},
+  {id:'dhiraj',  name:'Dhiraj',  color:'#FFD700',ini:'DS',email:'dhiraj.singh@maersk.com'},
+  {id:'kamakhya',name:'Kamakhya',color:'#FF8C00',ini:'KK',email:'kamakhya.kinkar@maersk.com'},
+  {id:'manish',  name:'Manish',  color:'#32CD32',ini:'MS',email:'manish.sambhar@maersk.com'},
+  {id:'mohini',  name:'Mohini',  color:'#FF69B4',ini:'MA',email:'mohini.agarwal@maersk.com'},
+  {id:'nibedita',name:'Nibedita',color:'#40E0D0',ini:'NB',email:'nibedita.basak@maersk.com'},
+  {id:'shantanu',name:'Shantanu',color:'#9370DB',ini:'SW',email:'shantanu.wagh@maersk.com'},
+  {id:'suresh',  name:'Suresh',  color:'#E8544A',ini:'SV',email:'suresh.verma@maersk.com'},
+  {id:'robby',   name:'Robby',   color:'#5CC8FF',ini:'RJ',email:'roby.jacob@maersk.com'},
+  {id:'milind',  name:'Milind',  color:'#A3D977',ini:'MS',email:'milind.sardar1@maersk.com'},
+  {id:'yashodip',name:'Yashodip',color:'#C77DFF',ini:'YP',email:'yashodip.patil@maersk.com'},
+  {id:'sanju',   name:'Sanju',   color:'#FFB84D',ini:'SS',email:'sanju.sasidharan@maersk.com'},
 ];
 const SEATS=11, LAYOUT=[[1,2,3,4,5,6],[7,8,9,10,11]];
 
@@ -689,6 +700,57 @@ async function renderWS(){
 }
 
 // ── FLOOR PLAN ────────────────────────────────────────────────────────────
+// ── FLOOR PLAN: pending seat pick + Save Changes ────────────────────────────
+S.floorPending = S.floorPending || {}; // dateKey -> seat number or 'clear'
+function floorEffectiveSeat(dkey, bkgs){
+  if(Object.prototype.hasOwnProperty.call(S.floorPending, dkey)){
+    const p = S.floorPending[dkey];
+    return p==='clear' ? null : p;
+  }
+  const mine = bkgs.find(b=>b.name===S.user && b.status==='Office');
+  return mine ? mine.seat : null;
+}
+function stageFloorSeat(sn){
+  if(!S.user){toast('Please select your name first!','w');return;}
+  const d=S.date; if(!d) return;
+  const dkey=dk(d);
+  const bkgs=S.cache[dkey]||[];
+  const currentEffective = floorEffectiveSeat(dkey, bkgs);
+  if(currentEffective===sn) delete S.floorPending[dkey]; // clicked same seat again = undo pending
+  else S.floorPending[dkey]=sn;
+  renderFloor();
+}
+function clearFloorPending(){
+  const d=S.date; if(!d) return;
+  const dkey=dk(d);
+  const bkgs=S.cache[dkey]||[];
+  const mine = bkgs.find(b=>b.name===S.user && b.status==='Office');
+  if(mine) S.floorPending[dkey]='clear'; else delete S.floorPending[dkey];
+  renderFloor();
+}
+async function saveFloorChanges(){
+  const d=S.date; if(!d) return;
+  const dkey=dk(d);
+  if(!Object.prototype.hasOwnProperty.call(S.floorPending, dkey)){toast('No changes to save','w');return;}
+  const pending = S.floorPending[dkey];
+  const bkgs = await apiFetch(dkey, true);
+  const existing = bkgs.find(b=>b.name===S.user);
+  if(existing) await apiCancel(S.user, dkey);
+  let ok=true, msg='';
+  if(pending!=='clear'){
+    const r=await apiBook(S.user, dkey, pending, 'Office');
+    ok=r.success; msg=r.message;
+  }
+  delete S.floorPending[dkey];
+  bust(dkey);
+  await selDate(d);
+  if(!ok){toast(msg,'e');return;}
+  showModal('🎉 Thanks for booking!',
+    `<p style="margin-bottom:0.5rem">Your seat is booked. Fair winds ahead! ⚓</p>
+     <div class="jokebox"><strong>😄 Joke of the day:</strong><br>${randomJoke()}</div>`,
+    [{l:'Nice one! 👍',c:'bp',fn:closeModal}]
+  );
+}
 async function renderFloor(){
   const d=S.date;
   if(!d){
@@ -698,18 +760,22 @@ async function renderFloor(){
   const dkey=dk(d);
   const bkgs=await apiFetch(dkey);
   const sm={};
-  bkgs.filter(b=>b.status==='Office').forEach(b=>sm[b.seat]=b.name);
+  bkgs.filter(b=>b.status==='Office').forEach(b=>{ if(b.name!==S.user) sm[b.seat]=b.name; });
+  const pendingSeat = floorEffectiveSeat(dkey, bkgs);
+  if(pendingSeat) sm[pendingSeat]=S.user;
   document.getElementById('fmeta').textContent=fmt(d,{weekday:'long',day:'numeric',month:'long'})+' · '+officeOf(bkgs).length+'/'+SEATS+' booked';
+  const isHistoric = isPast(d);
   let h='';
   LAYOUT.forEach((row,ri)=>{
     h+=`<div><div class="fpl">${ri===0?'Row A':'Row B'}</div><div class="sr">`;
     row.forEach(sn=>{
       const uid=sm[sn], m=uid?gm(uid):null, isMe=uid===S.user;
+      const isPendingHere = !isHistoric && Object.prototype.hasOwnProperty.call(S.floorPending,dkey) && floorEffectiveSeat(dkey,bkgs)===sn && isMe;
       const cls=uid?(isMe?'mine':'taken'):'free';
-      const canBook=!uid&&S.user&&!isPast(d)&&!isWE(d);
-      const canCancel=isMe&&!isPast(d);
-      const canDelete=uid&&!isPast(d);
-      const oc=canBook?`onclick="bookSeat(${sn})"`:canCancel?`onclick="cancelSeat(${sn})"`:canDelete?`onclick="deleteBooking('${uid}', '${dkey}', ${sn})"`:'';      h+=`<div class="seat ${cls}" ${oc} title="${m?m.name:(canBook?'Click to book':'')}">
+      const canBook=!isHistoric && !uid && S.user && !isWE(d);
+      const canToggleMine=!isHistoric && isMe && S.user;
+      const oc=(canBook||canToggleMine)?`onclick="stageFloorSeat(${sn})"`:'';
+      h+=`<div class="seat ${cls} ${isPendingHere?'pend':''}" ${oc} title="${m?m.name:(canBook?'Click to select':'')}">
         <div class="sicon">${uid?(isMe?'⭐':'🧑'):'🪑'}</div>
         <div class="snum">S${sn}</div>
         <div class="sname">${m?m.name:'Free'}</div>
@@ -719,6 +785,13 @@ async function renderFloor(){
     if(ri===0) h+=`<div class="aisle" style="width:100%"><div class="ailabel">aisle</div></div>`;
   });
   document.getElementById('fp').innerHTML=h;
+  const hasPending = Object.prototype.hasOwnProperty.call(S.floorPending, dkey);
+  const bar = document.getElementById('floorSaveBar');
+  if(isHistoric){
+    bar.innerHTML = `<div style="color:var(--tl);font-size:0.8rem;">📜 Viewing history — past dates can't be changed</div>`;
+  } else {
+    bar.innerHTML = `<div>${hasPending?`<strong style="color:var(--gold)">Unsaved seat change</strong>`:'<span style="color:var(--tl)">No unsaved changes</span>'}</div><div style="display:flex;gap:8px;">${hasPending?`<button class="btn bs" onclick="delete S.floorPending['${dkey}']; renderFloor();">Undo</button>`:''}<button class="btn bp" onclick="saveFloorChanges()">💾 Save Changes</button></div>`;
+  }
 }
 
 // ── WEEK TABLE ────────────────────────────────────────────────────────────
@@ -855,20 +928,38 @@ async function renderWeek(){
 }
 
 // ── ROSTER ────────────────────────────────────────────────────────────────
+S.rosterYear = S.rosterYear || new Date().getFullYear();
+S.rosterMonthNum = (S.rosterMonthNum===undefined) ? new Date().getMonth() : S.rosterMonthNum; // 0-11
+function rosterMonth(delta){
+  S.rosterMonthNum += delta;
+  if(S.rosterMonthNum > 11){S.rosterMonthNum=0; S.rosterYear++;}
+  if(S.rosterMonthNum < 0){S.rosterMonthNum=11; S.rosterYear--;}
+  renderRoster();
+}
+const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
 async function renderRoster(){
+  const y=S.rosterYear, mo=S.rosterMonthNum;
+  document.getElementById('rosterMonthLabel').textContent = MONTH_NAMES[mo]+' '+y;
+  const daysInMonth = new Date(y, mo+1, 0).getDate();
   const days=[];
-  let x=new Date();
-  while(days.length<5){if(!isWE(x)) days.push(new Date(x));x.setDate(x.getDate()+1);}
-  await Promise.all(days.map(d=>apiFetch(dk(d))));
-  let h=`<div class="bth" style="grid-template-columns:140px repeat(5,1fr)"><div>Member</div>${days.map(d=>`<div style="text-align:center">${fmt(d,{weekday:'short'})}<br><span style="font-weight:400;color:var(--sky)">${fmt(d,{day:'numeric',month:'short'})}</span></div>`).join('')}</div>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const dt=new Date(y, mo, d);
+    if(!isWE(dt)) days.push(dt);
+  }
+  let byDate={};
+  try{
+    const r=await fetch(`/api/bookings/month/${y}/${mo+1}`);
+    const data=await r.json();
+    byDate=data.bookings_by_date||{};
+  }catch(e){ byDate={}; }
+  const colWidth = Math.max(70, Math.floor(600/Math.max(days.length,1)));
+  let h=`<div class="bth" style="grid-template-columns:140px repeat(${days.length},minmax(${colWidth}px,1fr));min-width:${140+days.length*colWidth}px;"><div>Member</div>${days.map(d=>`<div style="text-align:center">${fmt(d,{weekday:'short'})}<br><span style="font-weight:400;color:var(--sky)">${d.getDate()}</span></div>`).join('')}</div>`;
   TEAM.forEach(m=>{
-    h+=`<div class="btr" style="grid-template-columns:140px repeat(5,1fr)"><div class="btp"><div class="btav" style="background:${m.color}33;color:${m.color}">${m.ini}</div>${m.name}</div>`;
+    h+=`<div class="btr" style="grid-template-columns:140px repeat(${days.length},minmax(${colWidth}px,1fr));min-width:${140+days.length*colWidth}px;"><div class="btp"><div class="btav" style="background:${m.color}33;color:${m.color}">${m.ini}</div>${m.name}</div>`;
     days.forEach(d=>{
       const dkey = dk(d);
-      const entry=getEntry(S.cache[dkey]||[],m.id);
-      const past = isPast(d);
-      const canDelete = entry && !past;
-      h+=`<div class="btc" ${canDelete?`onclick="deleteBooking('${m.id}', '${dkey}')" style="cursor:pointer" title="Click to delete (admin)"`:''}>${statusPill(entry)}</div>`;
+      const entry=(byDate[dkey]||[]).find(b=>b.name===m.id);
+      h+=`<div class="btc">${statusPill(entry)}</div>`;
     });
     h+=`</div>`;
   });
@@ -1025,14 +1116,49 @@ function toast(msg,type='i'){
   setTimeout(()=>t.remove(),4000);
 }
 
-// ── USER SELECT ───────────────────────────────────────────────────────────
-document.getElementById('usel').addEventListener('change',async function(){
-  S.user=this.value;
-  localStorage.setItem('ss_user',this.value);
-  const m=gm(this.value);
-  const av=document.getElementById('uav');
-  if(m){av.textContent=m.ini;av.style.background=`linear-gradient(135deg,${m.color},${m.color}88)`;}
-  else{av.textContent='?';av.style.background='linear-gradient(135deg,#0073AB,#00B5B1)';}
+// ── EMAIL LOGIN (identifies the user by their Maersk email; no password) ───
+function findByEmail(email){
+  const clean=(email||'').trim().toLowerCase();
+  return TEAM.find(m=>m.email.toLowerCase()===clean);
+}
+function showLoggedIn(m){
+  document.getElementById('loginBox').style.display='none';
+  document.getElementById('loggedInBox').style.display='flex';
+  document.getElementById('loggedInName').textContent=m.name;
+  const av=document.getElementById('uav2');
+  av.textContent=m.ini; av.style.background=`linear-gradient(135deg,${m.color},${m.color}88)`;
+}
+function showLoginPrompt(){
+  document.getElementById('loginBox').style.display='flex';
+  document.getElementById('loggedInBox').style.display='none';
+}
+function logoutUser(){
+  S.user='';
+  localStorage.removeItem('ss_user');
+  document.getElementById('emailInput').value='';
+  document.getElementById('loginMsg').textContent='';
+  showLoginPrompt();
+  updateDH();
+  renderPanel();
+}
+document.getElementById('emailInput').addEventListener('keydown', async function(e){
+  if(e.key!=='Enter') return;
+  const email=this.value.trim();
+  const msgEl=document.getElementById('loginMsg');
+  if(!email.toLowerCase().endsWith('@maersk.com')){
+    msgEl.style.color='var(--coral)';
+    msgEl.textContent='This site is only for Maersk Machinery Mumbai team members — use your @maersk.com email.';
+    return;
+  }
+  const m=findByEmail(email);
+  if(!m){
+    msgEl.style.color='var(--coral)';
+    msgEl.textContent="We couldn't find that email in the team list. Check for typos, or ask your admin to add you.";
+    return;
+  }
+  S.user=m.id;
+  localStorage.setItem('ss_user',m.id);
+  showLoggedIn(m);
   updateDH();
   await renderPanel();
 });
@@ -1043,11 +1169,11 @@ document.getElementById('nextM').onclick=()=>{S.mo++;if(S.mo>11){S.mo=0;S.yr++;}
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 async function init(){
-  // Restore saved user
+  // Restore saved user (from a previous email login on this device)
   if(S.user){
-    document.getElementById('usel').value=S.user;
     const m=gm(S.user);
-    if(m){const av=document.getElementById('uav');av.textContent=m.ini;av.style.background=`linear-gradient(135deg,${m.color},${m.color}88)`;}
+    if(m) showLoggedIn(m);
+    else { S.user=''; localStorage.removeItem('ss_user'); }
   }
 
   // Pick today or next Monday if weekend
@@ -1082,6 +1208,20 @@ def home():
 def api_get_bookings(date_str):
     rows = get_bookings_for_date(date_str)
     return jsonify({"date": date_str, "bookings": [{"name": r[0], "seat": r[1], "status": r[2]} for r in rows]})
+
+@app.route("/api/bookings/month/<int:year>/<int:month>")
+def api_get_month_bookings(year, month):
+    """Returns every booking for a given month in one call — used by the Full Roster
+    history view so it doesn't need one request per day."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT name, date, seat, status FROM bookings WHERE date LIKE %s", (f"{year:04d}-{month:02d}-%",))
+    rows = c.fetchall()
+    conn.close()
+    by_date = {}
+    for name, date_str, seat, status in rows:
+        by_date.setdefault(date_str, []).append({"name": name, "seat": seat, "status": status})
+    return jsonify({"year": year, "month": month, "bookings_by_date": by_date})
 
 @app.route("/api/book", methods=["POST"])
 def api_book():
