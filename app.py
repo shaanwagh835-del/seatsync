@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
-import smtplib, threading, time, os, io
+import smtplib, threading, time, os, io, socket
 import psycopg2
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -10,6 +10,15 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 app = Flask(__name__)
+
+_original_getaddrinfo = socket.getaddrinfo
+def _force_ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """Monkey-patches DNS resolution to only ever return IPv4 addresses, for the
+    duration of the SMTP connection. This avoids 'Network is unreachable' errors
+    that happen when Python picks an unreachable IPv6 address, while still using
+    the real hostname (not a raw IP) so SSL certificate verification still works."""
+    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
 
 # ── DATABASE (Postgres / Neon) ──────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -96,15 +105,19 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
         part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
         msg.attach(part)
     try:
-        if EMAIL_SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
-                server.login(EMAIL_USER, EMAIL_PASS)
-                server.sendmail(EMAIL_USER, recipients, msg.as_string())
-        else:
-            with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
-                server.starttls()
-                server.login(EMAIL_USER, EMAIL_PASS)
-                server.sendmail(EMAIL_USER, recipients, msg.as_string())
+        socket.getaddrinfo = _force_ipv4_getaddrinfo  # force IPv4 for this connection
+        try:
+            if EMAIL_SMTP_PORT == 465:
+                with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
+                    server.login(EMAIL_USER, EMAIL_PASS)
+                    server.sendmail(EMAIL_USER, recipients, msg.as_string())
+            else:
+                with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
+                    server.starttls()
+                    server.login(EMAIL_USER, EMAIL_PASS)
+                    server.sendmail(EMAIL_USER, recipients, msg.as_string())
+        finally:
+            socket.getaddrinfo = _original_getaddrinfo  # always restore normal DNS behavior after
         print(f"Email '{subject}' sent at {datetime.now()}")
         return True
     except Exception as e:
