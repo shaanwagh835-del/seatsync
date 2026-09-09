@@ -18,7 +18,7 @@ def get_db():
     """Open a fresh connection to the shared Postgres database."""
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL environment variable is not set")
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+    return psycopg2.connect(DATABASE_URL, sslmode="require", connect_timeout=15)
 
 # ── EMAIL / SCHEDULE CONFIG ─────────────────────────────────────────────────
 MONTHLY_REPORT_EMAIL = os.environ.get("MONTHLY_REPORT_EMAIL", "")  # e.g. shaanwagh835@gmail.com
@@ -97,11 +97,11 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
         msg.attach(part)
     try:
         if EMAIL_SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT) as server:
+            with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
                 server.login(EMAIL_USER, EMAIL_PASS)
                 server.sendmail(EMAIL_USER, recipients, msg.as_string())
         else:
-            with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT) as server:
+            with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
                 server.starttls()
                 server.login(EMAIL_USER, EMAIL_PASS)
                 server.sendmail(EMAIL_USER, recipients, msg.as_string())
