@@ -1,23 +1,13 @@
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
-import smtplib, threading, time, os, io, socket
+import threading, time, os, io, base64
+import requests
 import psycopg2
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 app = Flask(__name__)
 
-_original_getaddrinfo = socket.getaddrinfo
-def _force_ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    """Monkey-patches DNS resolution to only ever return IPv4 addresses, for the
-    duration of the SMTP connection. This avoids 'Network is unreachable' errors
-    that happen when Python picks an unreachable IPv6 address, while still using
-    the real hostname (not a raw IP) so SSL certificate verification still works."""
-    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
 
 
 # ── DATABASE (Postgres / Neon) ──────────────────────────────────────────────
@@ -79,47 +69,45 @@ def get_bookings_for_date(date_str):
     return rows
 
 def send_email(subject, html_body, recipients, attachment_bytes=None, attachment_name=None):
-    """Generic email sender used by both the daily reminder and the monthly roster."""
-    EMAIL_USER = os.environ.get("EMAIL_USER", "")
-    EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
-    EMAIL_SMTP_HOST = os.environ.get("EMAIL_SMTP_HOST", "smtp.office365.com")
-    EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
+    """Generic email sender used by both the daily reminder and the monthly roster.
+    Uses Brevo's HTTPS API instead of SMTP, because Render's free tier blocks all
+    outbound SMTP connections (ports 25/465/587) as an anti-spam measure — sending
+    over plain HTTPS sidesteps that restriction entirely."""
+    BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+    EMAIL_USER = os.environ.get("EMAIL_USER", "")  # the verified "sender" address in Brevo
     EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Shantanu Wagh")
-    if not EMAIL_USER or not EMAIL_PASS:
-        print("EMAIL_USER or EMAIL_PASS not set.")
+    if not BREVO_API_KEY or not EMAIL_USER:
+        print("BREVO_API_KEY or EMAIL_USER not set.")
         return False
     if not recipients:
         print("No recipients to send to.")
         return False
-    msg = MIMEMultipart("mixed")
-    msg["Subject"] = subject
-    msg["From"] = f"{EMAIL_FROM_NAME} <{EMAIL_USER}>"
-    msg["To"] = ", ".join(recipients)
-    alt = MIMEMultipart("alternative")
-    alt.attach(MIMEText(html_body, "html"))
-    msg.attach(alt)
+
+    payload = {
+        "sender": {"name": EMAIL_FROM_NAME, "email": EMAIL_USER},
+        "to": [{"email": r} for r in recipients],
+        "subject": subject,
+        "htmlContent": html_body,
+    }
     if attachment_bytes is not None:
-        part = MIMEBase("application", "octet-stream")
-        part.set_payload(attachment_bytes)
-        encoders.encode_base64(part)
-        part.add_header("Content-Disposition", f'attachment; filename="{attachment_name}"')
-        msg.attach(part)
+        payload["attachment"] = [{
+            "content": base64.b64encode(attachment_bytes).decode("ascii"),
+            "name": attachment_name,
+        }]
+
     try:
-        socket.getaddrinfo = _force_ipv4_getaddrinfo  # force IPv4 for this connection
-        try:
-            if EMAIL_SMTP_PORT == 465:
-                with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
-                    server.login(EMAIL_USER, EMAIL_PASS)
-                    server.sendmail(EMAIL_USER, recipients, msg.as_string())
-            else:
-                with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=15) as server:
-                    server.starttls()
-                    server.login(EMAIL_USER, EMAIL_PASS)
-                    server.sendmail(EMAIL_USER, recipients, msg.as_string())
-        finally:
-            socket.getaddrinfo = _original_getaddrinfo  # always restore normal DNS behavior after
-        print(f"Email '{subject}' sent at {datetime.now()}")
-        return True
+        resp = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+        if resp.status_code in (200, 201):
+            print(f"Email '{subject}' sent at {datetime.now()}")
+            return True
+        else:
+            print(f"Email failed: Brevo returned {resp.status_code}: {resp.text}")
+            return False
     except Exception as e:
         print(f"Email failed: {e}")
         return False
