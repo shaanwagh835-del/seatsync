@@ -68,11 +68,9 @@ def get_bookings_for_date(date_str):
     conn.close()
     return rows
 
-def send_email(subject, html_body, recipients, attachment_bytes=None, attachment_name=None):
-    """Generic email sender used by both the daily reminder and the monthly roster.
-    Uses Brevo's HTTPS API instead of SMTP, because Render's free tier blocks all
-    outbound SMTP connections (ports 25/465/587) as an anti-spam measure — sending
-    over plain HTTPS sidesteps that restriction entirely."""
+def send_via_brevo(subject, html_body, recipients, attachment_bytes=None, attachment_name=None):
+    """Sends via Brevo's HTTPS API. Works today, but Maersk's mail security is
+    cautious about it since it can't be authenticated as a genuine Gmail sender."""
     BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
     EMAIL_USER = os.environ.get("EMAIL_USER", "")  # the verified "sender" address in Brevo
     EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Shantanu Wagh")
@@ -103,14 +101,59 @@ def send_email(subject, html_body, recipients, attachment_bytes=None, attachment
             timeout=15,
         )
         if resp.status_code in (200, 201):
-            print(f"Email '{subject}' sent at {datetime.now()}")
+            print(f"Email '{subject}' sent via Brevo at {datetime.now()}")
             return True
         else:
-            print(f"Email failed: Brevo returned {resp.status_code}: {resp.text}")
+            print(f"Email failed (Brevo): Brevo returned {resp.status_code}: {resp.text}")
             return False
     except Exception as e:
-        print(f"Email failed: {e}")
+        print(f"Email failed (Brevo): {e}")
         return False
+
+
+def send_via_power_automate(subject, html_body, recipients, attachment_bytes=None, attachment_name=None):
+    """Sends via a Power Automate flow that uses your real Maersk Outlook account —
+    genuinely authenticated, so it should land reliably without spam-filtering.
+    Requires POWER_AUTOMATE_URL to be set (the flow's HTTP trigger URL) and a
+    Power Automate Premium license on the flow's owner account."""
+    POWER_AUTOMATE_URL = os.environ.get("POWER_AUTOMATE_URL", "")
+    if not POWER_AUTOMATE_URL:
+        print("POWER_AUTOMATE_URL not set.")
+        return False
+    if not recipients:
+        print("No recipients to send to.")
+        return False
+    # Note: attachments aren't wired up for Power Automate yet (only the daily
+    # reminder needs this path right now; the monthly roster with its Excel
+    # attachment can stay on Brevo, or this can be extended later).
+    payload = {
+        "subject": subject,
+        "htmlBody": html_body,
+        "recipients": ";".join(recipients),  # Outlook's "To" field wants a semicolon-separated string
+    }
+    try:
+        resp = requests.post(POWER_AUTOMATE_URL, json=payload, timeout=15)
+        if resp.status_code in (200, 202):
+            print(f"Email '{subject}' sent via Power Automate at {datetime.now()}")
+            return True
+        else:
+            print(f"Email failed (Power Automate): returned {resp.status_code}: {resp.text}")
+            return False
+    except Exception as e:
+        print(f"Email failed (Power Automate): {e}")
+        return False
+
+
+def send_email(subject, html_body, recipients, attachment_bytes=None, attachment_name=None):
+    """Generic email sender used by both the daily reminder and the monthly roster.
+    Picks the provider based on EMAIL_PROVIDER env var: 'brevo' (default, works now)
+    or 'power_automate' (better deliverability, needs a Premium license from IT first).
+    Switching providers is just changing this one environment variable — no redeploy
+    of code needed beyond what's already here."""
+    provider = os.environ.get("EMAIL_PROVIDER", "brevo").lower()
+    if provider == "power_automate":
+        return send_via_power_automate(subject, html_body, recipients, attachment_bytes, attachment_name)
+    return send_via_brevo(subject, html_body, recipients, attachment_bytes, attachment_name)
 
 def send_daily_seat_reminder():
     """At 4:30 PM: emails everyone who has NOT booked an office seat yet for tomorrow,
