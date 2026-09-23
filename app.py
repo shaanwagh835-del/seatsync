@@ -168,19 +168,27 @@ def send_daily_seat_reminder():
         print(f"Everyone has already booked a seat for {date_str}, no reminder needed.")
         return
     pretty_date = tomorrow.strftime("%A, %d %b %Y")
+    site_url = os.environ.get("APP_URL", "https://seat-booking-app-w5nh.onrender.com")
+    button_html = f"""<p style="margin-top:20px;">
+        <a href="{site_url}" style="background:#0073AB;color:#ffffff;padding:12px 24px;
+        border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;">
+        Book Your Seat Now →</a></p>
+        <p style="font-size:0.85em;color:#666;">Or copy this link: {site_url}</p>"""
     if available > 0:
         subject = f"🟢 {available} seat(s) available for {pretty_date} — book soon!"
         html_body = f"""<h2>BookMySeat — Seat Availability</h2>
         <p>You haven't booked a seat for <b>{pretty_date}</b> yet.</p>
         <p><b>{available}</b> out of {TOTAL_SEATS} seats are still available.</p>
-        <p>Please book as soon as possible if you plan to come to office.</p>"""
+        <p>Please book as soon as possible if you plan to come to office.</p>
+        {button_html}"""
     else:
         subject = f"🔴 No seats available for {pretty_date}"
         html_body = f"""<h2>BookMySeat — Seat Availability</h2>
         <p>You haven't booked a seat for <b>{pretty_date}</b> yet.</p>
         <p>All {TOTAL_SEATS} seats are already booked.</p>
         <p>Sorry about that — please try to work from home tomorrow. 😊😊</p>
-        <p>Stay home, stay safe!</p>"""
+        <p>Stay home, stay safe!</p>
+        {button_html}"""
     send_email(subject, html_body, recipients)
 
 def build_monthly_roster_xlsx(year, month):
