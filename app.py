@@ -961,6 +961,10 @@ async function renderWeek(){
       if(past){
         const entry=getEntry(S.cache[dkey]||[],m.id);
         h+=`<div class="btc">${statusPill(entry)}</div>`;
+      } else if(m.id !== S.user){
+        // Not the logged-in user's own row — visible, but read-only
+        const entry=getEntry(S.cache[dkey]||[],m.id);
+        h+=`<div class="btc">${statusPill(entry)}</div>`;
       } else {
         const full = effectiveOfficeCount(dkey) >= SEATS && eff !== 'Office';
         h+=`<div class="btc"><select class="usel ${isPending?'pend':''}" style="padding:4px 8px;font-size:0.75rem;width:auto;min-width:100px;" onchange="onWeekDropdown('${m.id}','${dkey}', this.value)">
